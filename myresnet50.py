@@ -10,7 +10,7 @@ from skimage.transform import resize
 # Removes the last fully convolutional layer
 class MyResnet50(nn.Module):
     def __init__(self,
-                 load_model_path=os.path.join('models', 'resnet50.pth'),
+                 load_model_path='resnet50.pth',
                  cuda=True):
 
         super(MyResnet50, self).__init__()

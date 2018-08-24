@@ -1,3 +1,4 @@
+import time
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
@@ -26,7 +27,8 @@ class CobNet(nn.Module):
                  batch_size=4,
                  shuffle=True,
                  num_workers=4,
-                 num_epochs=20):
+                 num_epochs=20,
+                 cuda=False):
 
         super(CobNet, self).__init__()
         self.base_model = MyResnet50(cuda=False)
@@ -62,7 +64,7 @@ class CobNet(nn.Module):
         self.dataloaders = {'train': self.dataloader_train,
                             'val': self.dataloader_val}
 
-        self.device = torch.device("cuda:0" if torch.cuda.is_available() \
+        self.device = torch.device("cuda:0" if cuda \
                                    else "cpu")
 
         self.criterion = CobNetLoss()
@@ -79,6 +81,7 @@ class CobNet(nn.Module):
     def deepcopy(self):
 
         dict_ = {k:copy.deepcopy(v) for k,v in self.get_all_modules_as_dict()}
+        return dict_
 
     def train_mode(self):
 
@@ -300,9 +303,9 @@ class CobNet(nn.Module):
         return y_all
 
     def train(self):
-        import pdb; pdb.set_trace()
         since = time.time()
 
+        import pdb; pdb.set_trace()
         best_model_wts = self.deepcopy()
         best_acc = 0.0
 
