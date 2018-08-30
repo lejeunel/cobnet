@@ -125,25 +125,17 @@ class CobNet(nn.Module):
         # Build for each orientation the output module,
         # i.e. conv2d + sigmoid
 
-        modules = dict()
-        for orient in self.orientation_keys:
-            modules[orient] = nn.Sequential(*[nn.Conv2d(
-                in_channels=7*5, # 7 dims per scale
-                out_channels=1,
-                padding=1,
-                kernel_size=3),
-                                              nn.Sigmoid()])
-
-        return modules
+        return None
 
     def make_all_orientation_modules(self):
         # Build dictionaries of per-orientation modules
 
-        modules = list()
+        models_orient = dict()
         for orient in self.orientation_keys:
-            modules.append(CobNetOrientationModule(self.base_model, orient))
+            m_ = CobNetOrientationModule(self.base_model, orient)
+            models_orient[orient] = m_
 
-        return modules
+        return models_orient
 
     def make_scale_layers(self):
         # Build dictionaries of per-scale sigmoid layers
@@ -179,11 +171,11 @@ class CobNet(nn.Module):
                    3: self.scale_modules[3](layer3_out),
                    4: self.scale_modules[4](layer4_out)}
 
-        #y_orient = dict() # This stores one output per orientation module
-        #for orient in self.orientation_keys:
-        #    y_orient[orient] = self.forward_on_module(y_scale, im, orient)
+        y_orient = dict() # This stores one output per orientation module
+        for orient in self.orientation_keys:
+            y_orient[orient] = self.orientation_modules[orient](im)
 
-        return y_scale
+        return y_scale, y_orient
 
     def forward_on_module(self, x, im, orientation):
         # Forward pass of dict of tensors x.
@@ -317,6 +309,7 @@ class CobNetLoss(nn.Module):
         # make transforms to resize target to size of y_scale[s]
         resize_transf = {s: transforms.Resize(y_scale[s].shape[-2:])
                          for s in y_scale.keys()}
+        import pdb; pdb.set_trace()
         loss_scales = 0
         if(target_scale is not None):
             for s in y_scale.keys():
