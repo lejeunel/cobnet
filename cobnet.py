@@ -5,12 +5,17 @@ from torch.autograd import Variable
 from torchvision import models
 from torchvision.models import VGG
 from torchvision import transforms
+from torch.utils.data import DataLoader
+import torch.optim as optim
+from torch.optim import lr_scheduler
 import os
+import copy
 from myresnet50 import MyResnet50
 import numpy as np
 import matplotlib.pyplot as plt
 from skimage.transform import resize
 from dataloader import CobDataLoader
+from cobnet_orient import CobNetOrientationModule
 
 # Model for Convolutional Oriented Boundaries
 # Needs a base model (vgg, resnet, ...) from which intermediate
@@ -26,12 +31,14 @@ class CobNet(nn.Module):
                  transform=None,
                  batch_size=4,
                  shuffle=True,
-                 num_workers=4,
+                 num_workers=0,
                  num_epochs=20,
+                 lr=0.001,
+                 momentum=0.9,
                  cuda=False):
 
         super(CobNet, self).__init__()
-        self.base_model = MyResnet50(cuda=False)
+        self.base_model = MyResnet50(cuda=False, batch_size=batch_size)
 
         self.n_orientations = n_orientations # Parameter K in maninis17
         self.max_angle_orientations = max_angle_orientations
@@ -48,26 +55,41 @@ class CobNet(nn.Module):
         self.scale_modules = self.make_scale_layers()
 
         self.dataloader_train = CobDataLoader(img_paths_train,
-                                        truth_paths_train,
-                                        transform,
-                                        batch_size,
-                                        shuffle,
-                                        num_workers)
+                                              truth_paths_train,
+                                              transform)
 
         self.dataloader_val = CobDataLoader(img_paths_val,
-                                        truth_paths_val,
-                                        transform,
-                                        batch_size,
-                                        shuffle,
-                                        num_workers)
+                                            truth_paths_val,
+                                            transform)
 
-        self.dataloaders = {'train': self.dataloader_train,
-                            'val': self.dataloader_val}
+        self.dataloaders = {'train': DataLoader(self.dataloader_train,
+                                                batch_size=batch_size,
+                                                shuffle=shuffle,
+                                                num_workers=num_workers),
+                            'val': DataLoader(self.dataloader_val,
+                                              batch_size=batch_size,
+                                              shuffle=shuffle,
+                                              num_workers=num_workers)}
+        for i, sample in enumerate(self.dataloader_train):
+            print(sample[0].size(), sample[1].size())
+
+            if i == 3:
+                break
+
+        for i, sample in enumerate(self.dataloader_val):
+            print(sample[0].size(), sample[1].size())
+
+            if i == 3:
+                break
 
         self.device = torch.device("cuda:0" if cuda \
                                    else "cpu")
 
         self.criterion = CobNetLoss()
+        self.num_epochs = num_epochs
+        self.num_works = num_workers
+        self.lr = lr
+        self.momentum = momentum
 
     def get_all_modules_as_dict(self):
 
@@ -80,13 +102,19 @@ class CobNet(nn.Module):
 
     def deepcopy(self):
 
-        dict_ = {k:copy.deepcopy(v) for k,v in self.get_all_modules_as_dict()}
+        dict_ = {k:copy.deepcopy(v)
+                 for k,v in self.get_all_modules_as_dict().items()}
         return dict_
 
     def train_mode(self):
 
-        for name, module in self.get_all_modules_as_dict().items():
-            module.train()
+        self.base_model.train()
+
+        for m in self.orientation_modules:
+            m.train()
+
+        for k, v in self.scale_modules.items():
+            v.train()
 
     def eval_mode(self):
 
@@ -111,9 +139,9 @@ class CobNet(nn.Module):
     def make_all_orientation_modules(self):
         # Build dictionaries of per-orientation modules
 
-        modules = dict()
+        modules = list()
         for orient in self.orientation_keys:
-            modules[orient] = self.make_single_orientation_layers()
+            modules.append(CobNetOrientationModule(self.base_model, orient))
 
         return modules
 
@@ -127,108 +155,6 @@ class CobNet(nn.Module):
 
         return modules
 
-    def make_single_orientation_layers(self):
-        # From model:
-        # https://github.com/kmaninis/COB/blob/master/models/deploy.prototxt
-
-        # Scale 1 (Will take conv1 layer as input)
-        conv_1 = nn.Conv2d(
-            in_channels=self.base_model.model.conv1.out_channels,
-            out_channels=32,
-            kernel_size=3,
-            padding=1)
-        conv_2 = nn.Conv2d(
-            in_channels=conv_1.out_channels,
-            out_channels=4,
-            kernel_size=3,
-            padding=1)
-
-        # Scale 2 (Will take conv3 of last bottleneck as input)
-        conv_3 = nn.Conv2d(
-            in_channels=self.base_model.model.layer1.__getitem__(-1).conv3.out_channels,
-            out_channels=4,
-            kernel_size=3,
-            padding=1)
-        conv_4 = nn.Conv2d(
-            in_channels=conv_3.out_channels,
-            out_channels=4,
-            kernel_size=3,
-            padding=1)
-        deconv_1 = nn.ConvTranspose2d(
-            in_channels=conv_4.out_channels,
-            out_channels=4,
-            stride=2,
-            kernel_size=4)
-
-        ## Scale 3 (Will take conv3 of last bottleneck as input)
-        conv_5 = nn.Conv2d(
-            in_channels=self.base_model.model.layer2.__getitem__(-1).conv3.out_channels,
-            out_channels=32,
-            kernel_size=3,
-            padding=1)
-        conv_6 = nn.Conv2d(
-            in_channels=conv_5.out_channels,
-            out_channels=4,
-            kernel_size=3,
-            padding=1)
-        deconv_2 = nn.ConvTranspose2d(
-            in_channels=conv_6.out_channels,
-            out_channels=4,
-            kernel_size=8,
-            stride=4)
-        ## crop concat???
-
-        ## Scale 4 (Will take conv3 of last bottleneck as input)
-        conv_7 = nn.Conv2d(
-            in_channels=self.base_model.model.layer3.__getitem__(-1).conv3.out_channels,
-            out_channels=32,
-            kernel_size=3,
-            padding=1)
-        conv_8 = nn.Conv2d(
-            in_channels=conv_7.out_channels,
-            out_channels=4,
-            kernel_size=3,
-            padding=1)
-        deconv_3 = nn.ConvTranspose2d(
-            in_channels=conv_8.out_channels,
-            out_channels=4,
-            kernel_size=16,
-            stride=8)
-        ## crop concat???
-
-        ## Scale 5
-        conv_9 = nn.Conv2d(
-            in_channels=self.base_model.model.layer4.__getitem__(-1).conv3.out_channels,
-            out_channels=32,
-            kernel_size=3,
-            padding=1)
-        conv_10 = nn.Conv2d(
-            in_channels=conv_7.out_channels,
-            out_channels=4,
-            kernel_size=3,
-            padding=1)
-        deconv_4 = nn.ConvTranspose2d(
-            in_channels=conv_10.out_channels,
-            out_channels=4,
-            kernel_size=32,
-            stride=16)
-        ## crop concat???
-
-        self.conv_layers = [conv_1, conv_2, conv_3,
-                            conv_4, conv_5, conv_6,
-                            conv_7, conv_8, conv_9, conv_10]
-
-        for l in self.conv_layers:
-            nn.init.normal_(l.weight, mean=0, std=0.01)
-
-        # Make dict for each scale
-        dict_ = {0: nn.Sequential(*[conv_1, conv_2]),
-                 1: nn.Sequential(*[conv_3, conv_4, deconv_1]),
-                 2: nn.Sequential(*[conv_5, conv_6, deconv_2]),
-                 3: nn.Sequential(*[conv_7, conv_8, deconv_3]),
-                 4: nn.Sequential(*[conv_9, conv_10, deconv_4])}
-
-        return dict_
 
     def forward(self, im):
         # im: Input image (Tensor)
@@ -294,7 +220,6 @@ class CobNet(nn.Module):
             # Concatenate image tensor
             y[key] = torch.cat((im_resized, y_resized), 1)
 
-
         #Resize all to input image size
         # Concatenate outputs of all modules
         y_all = torch.cat([y[k] for k in y.keys()], 1)
@@ -305,12 +230,21 @@ class CobNet(nn.Module):
     def train(self):
         since = time.time()
 
-        import pdb; pdb.set_trace()
         best_model_wts = self.deepcopy()
         best_acc = 0.0
 
+        # Observe that all parameters are being optimized
+        optimizer = optim.SGD(self.base_model.parameters(),
+                              lr=self.lr,
+                              momentum=self.momentum)
+
+        # Decay LR by a factor of 0.1 every 7 epochs
+        scheduler = lr_scheduler.StepLR(optimizer,
+                                               step_size=7,
+                                               gamma=0.1)
+
         for epoch in range(self.num_epochs):
-            print('Epoch {}/{}'.format(epoch, num_epochs - 1))
+            print('Epoch {}/{}'.format(epoch, self.num_epochs - 1))
             print('-' * 10)
 
             # Each epoch has a training and validation phase
@@ -325,17 +259,17 @@ class CobNet(nn.Module):
                 running_corrects = 0
 
                 # Iterate over data.
-                for inputs, labels in dataloaders[phase]:
+                for inputs, labels in self.dataloaders[phase]:
                     inputs = inputs.to(self.device)
                     labels = labels.to(self.device)
 
                     # zero the parameter gradients
-                    self.optimizer.zero_grad()
+                    optimizer.zero_grad()
 
                     # forward
                     # track history if only in train
                     with torch.set_grad_enabled(phase == 'train'):
-                        outputs = model(inputs)
+                        outputs = self.forward(inputs)
                         loss = self.criterion(outputs, labels)
 
                         # backward + optimize only if in training phase
@@ -374,18 +308,23 @@ class CobNetLoss(nn.Module):
         super(CobNetLoss, self).__init__()
 
 
-    def forward(self, out_scales, target_scale=None):
+    def forward(self, y_scale, target_scale=None):
         # im: Input image (Tensor)
         # target_scale: Truths for all scales (ResNet part)
         # target_orient: Truths for all orientations (Orientation modules)
 
+
+        # make transforms to resize target to size of y_scale[s]
+        resize_transf = {s: transforms.Resize(y_scale[s].shape[-2:])
+                         for s in y_scale.keys()}
         loss_scales = 0
         if(target_scale is not None):
-            # class imbalance
-            for s in range(5):
-                beta = torch.sum(target_scale[s])/np.prod(y_scale[s].shape)
-                idx_pos = torch.where(target_scale[s] > 0)
-                idx_neg = torch.where(target_scale[s] == 0)
+            for s in y_scale.keys():
+                # beta is for class imbalance
+                t_  = resize_transf[s](target_scale[s])
+                beta = torch.sum(t_)/np.prod(y_scale[s].shape)
+                idx_pos = torch.where(t_ > 0)
+                idx_neg = torch.where(t_ == 0)
                 loss_scales += -beta*torch.sum(y_scale[s][idx_pos]) \
                     -(1-beta)*torch.sum(y_scale[s][idx_neg])
 

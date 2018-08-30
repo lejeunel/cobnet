@@ -10,10 +10,13 @@ from skimage.transform import resize
 # Removes the last fully convolutional layer
 class MyResnet50(nn.Module):
     def __init__(self,
+                 batch_size=1,
                  load_model_path='resnet50.pth',
                  cuda=True):
 
         super(MyResnet50, self).__init__()
+
+        self.batch_size = batch_size
 
         # Download original pre-trained Resnet50 if not given
         if(not os.path.exists(load_model_path)):
@@ -39,11 +42,11 @@ class MyResnet50(nn.Module):
     #    # Returns outputs of conv1 and layer{1, ..., 4}
 
         # Initialize tensors
-        conv1_out = torch.zeros((1, 64, 112, 112))
-        layer1_out = torch.zeros((1, 256, 56, 56))
-        layer2_out = torch.zeros((1, 512, 28, 28))
-        layer3_out = torch.zeros((1, 1024, 14, 14))
-        layer4_out = torch.zeros((1, 2048, 7, 7))
+        conv1_out = torch.zeros((self.batch_size, 64, 112, 112))
+        layer1_out = torch.zeros((self.batch_size, 256, 56, 56))
+        layer2_out = torch.zeros((self.batch_size, 512, 28, 28))
+        layer3_out = torch.zeros((self.batch_size, 1024, 14, 14))
+        layer4_out = torch.zeros((self.batch_size, 2048, 7, 7))
 
         # Set hooks
         def copy_conv1_data(m, i, o):
@@ -102,43 +105,43 @@ class MyResnet50(nn.Module):
 
         return loss
 
-    def train(self, x, y):
-        # x: list of tensors (already normalized for imagenet)
-        # y: corresponding contour groundtruths (numpy arrays)
+    #def train(self, x, y):
+    #    # x: list of tensors (already normalized for imagenet)
+    #    # y: corresponding contour groundtruths (numpy arrays)
 
-        # Spawn 1 optimizer per scale
-        learning_rate = 0.01
-        n_epochs = 20
-        optims = [optim.Adam(m.parameters(), lr=learning_rate)
-                  for m in [self.model.conv1,
-                            self.model.layer1,
-                            self.model.layer2,
-                            self.model.layer3,
-                            self.model.layer4]]
-        # Begin!
-        for epoch in range(1, n_epochs + 1):
+    #    # Spawn 1 optimizer per scale
+    #    learning_rate = 0.01
+    #    n_epochs = 20
+    #    optims = [optim.Adam(m.parameters(), lr=learning_rate)
+    #              for m in [self.model.conv1,
+    #                        self.model.layer1,
+    #                        self.model.layer2,
+    #                        self.model.layer3,
+    #                        self.model.layer4]]
+    #    # Begin!
+    #    for epoch in range(1, n_epochs + 1):
 
-            # Get training data for this cycle
-            training_pair = variables_from_pair(random.choice(pairs))
-            input_variable = training_pair[0]
-            target_variable = training_pair[1]
+    #        # Get training data for this cycle
+    #        training_pair = variables_from_pair(random.choice(pairs))
+    #        input_variable = training_pair[0]
+    #        target_variable = training_pair[1]
 
-            # Run the train function
-            loss = train(input_variable, target_variable, encoder, decoder, encoder_optimizer, decoder_optimizer, criterion)
+    #        # Run the train function
+    #        loss = train(input_variable, target_variable, encoder, decoder, encoder_optimizer, decoder_optimizer, criterion)
 
-            # Keep track of loss
-            print_loss_total += loss
-            plot_loss_total += loss
+    #        # Keep track of loss
+    #        print_loss_total += loss
+    #        plot_loss_total += loss
 
-            if epoch == 0: continue
+    #        if epoch == 0: continue
 
-            if epoch % print_every == 0:
-                print_loss_avg = print_loss_total / print_every
-                print_loss_total = 0
-                print_summary = '%s (%d %d%%) %.4f' % (time_since(start, epoch / n_epochs), epoch, epoch / n_epochs * 100, print_loss_avg)
-                print(print_summary)
+    #        if epoch % print_every == 0:
+    #            print_loss_avg = print_loss_total / print_every
+    #            print_loss_total = 0
+    #            print_summary = '%s (%d %d%%) %.4f' % (time_since(start, epoch / n_epochs), epoch, epoch / n_epochs * 100, print_loss_avg)
+    #            print(print_summary)
 
-            if epoch % plot_every == 0:
-                plot_loss_avg = plot_loss_total / plot_every
-                plot_losses.append(plot_loss_avg)
-                plot_loss_total = 0
+    #        if epoch % plot_every == 0:
+    #            plot_loss_avg = plot_loss_total / plot_every
+    #            plot_losses.append(plot_loss_avg)
+    #            plot_loss_total = 0

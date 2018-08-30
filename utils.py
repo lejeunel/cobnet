@@ -36,10 +36,10 @@ def load_image(image_path, transform=None):
     image = Image.open(image_path)
 
     if transform:
-        image = transform(image).unsqueeze(0)
+        image = transform(image)
 
     #return Variable(image.to(device))
-    return Variable(image.to(device))
+    return image.to(device)
 
 def crop_and_concat(self, upsampled, bypass, crop=False):
     if crop:
@@ -52,7 +52,7 @@ def generate_oriented_boundaries(boundary_map):
 
     return [convolve(boundary_map.astype(float), f) for f in  filts]
 
-def load_boundaries(path):
+def load_boundaries_bsds(path):
     """
     Load the ground truth boundaries from the Matlab file
     at the specified path.
@@ -61,5 +61,8 @@ def load_boundaries(path):
     boundary ground truth
     """
     gt = io.loadmat(path)
-    num_gts = gt.shape[1]
-    return [gt[0,i]['Boundaries'][0,0] for i in range(num_gts)]
+    gts = [gt['groundTruth'][0,i]['Boundaries'][0,0]
+           for i in range(gt['groundTruth'][0,:].size)]
+
+    # Return random segmentation for 5 users
+    return gts
