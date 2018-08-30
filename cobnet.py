@@ -15,7 +15,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from skimage.transform import resize
 from dataloader import CobDataLoader
-from cobnet_orient import CobNetOrientationModule
+from cobnet_orientation import CobNetOrientationModule
 
 # Model for Convolutional Oriented Boundaries
 # Needs a base model (vgg, resnet, ...) from which intermediate
@@ -51,7 +51,6 @@ class CobNet(nn.Module):
                                             self.n_orientations, dtype=int)
 
         self.orientation_modules = self.make_all_orientation_modules()
-        self.output_modules = self.make_all_output_orientation_modules()
         self.scale_modules = self.make_scale_layers()
 
         self.dataloader_train = CobDataLoader(img_paths_train,
@@ -120,12 +119,6 @@ class CobNet(nn.Module):
 
         for name, module in self.get_all_modules_as_dict().items():
             module.eval()
-
-    def make_all_output_orientation_modules(self):
-        # Build for each orientation the output module,
-        # i.e. conv2d + sigmoid
-
-        return None
 
     def make_all_orientation_modules(self):
         # Build dictionaries of per-orientation modules
@@ -309,7 +302,6 @@ class CobNetLoss(nn.Module):
         # make transforms to resize target to size of y_scale[s]
         resize_transf = {s: transforms.Resize(y_scale[s].shape[-2:])
                          for s in y_scale.keys()}
-        import pdb; pdb.set_trace()
         loss_scales = 0
         if(target_scale is not None):
             for s in y_scale.keys():

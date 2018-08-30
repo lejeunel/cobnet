@@ -3,6 +3,7 @@ import torch.nn as nn
 class CobNetOrientationModule(nn.Module):
     def __init__(self, base_model, orientation):
 
+        super(CobNetOrientationModule, self).__init__()
         # This is the resnet50
         # Calling its forward function returns outputs of 5 scale block
         # This will give the inputs of the layers (one per scale)
@@ -60,7 +61,7 @@ class CobNetOrientationModule(nn.Module):
             kernel_size=3,
             padding=1)
         conv_2 = nn.Conv2d(
-            in_channels=conv_1.out_features,
+            in_channels=conv_1.out_channels,
             out_channels=4,
             kernel_size=3,
             padding=1)
@@ -69,17 +70,17 @@ class CobNetOrientationModule(nn.Module):
 
         # From scale 1
         conv_3 = nn.Conv2d(
-            in_channels=self.base_model.model.layer1,
-            out_channels=4,
+            in_channels=self.base_model.model.layer1[-1].conv3.out_channels,
+            out_channels=32,
             kernel_size=3,
             padding=1)
         conv_4 = nn.Conv2d(
-            in_channels=conv_3.out_features,
+            in_channels=conv_3.out_channels,
             out_channels=4,
             kernel_size=3,
             padding=1)
         deconv_1 = nn.ConvTranspose2d(
-            in_channels=conv_4.out_features,
+            in_channels=conv_4.out_channels,
             out_channels=4,
             stride=2,
             kernel_size=4)
@@ -88,17 +89,17 @@ class CobNetOrientationModule(nn.Module):
 
         # From scale 2
         conv_5 = nn.Conv2d(
-            in_channels=self.base_model.model.layer2,
-            out_channels=4,
+            in_channels=self.base_model.model.layer2[-1].conv3.out_channels,
+            out_channels=32,
             kernel_size=3,
             padding=1)
         conv_6 = nn.Conv2d(
-            in_channels=conv_5.out_features,
+            in_channels=conv_5.out_channels,
             out_channels=4,
             kernel_size=3,
             padding=1)
         deconv_2 = nn.ConvTranspose2d(
-            in_channels=conv_6.out_features,
+            in_channels=conv_6.out_channels,
             out_channels=4,
             stride=4,
             kernel_size=8)
@@ -107,17 +108,17 @@ class CobNetOrientationModule(nn.Module):
 
         # From scale 3
         conv_7 = nn.Conv2d(
-            in_channels=self.base_model.model.layer3,
-            out_channels=4,
+            in_channels=self.base_model.model.layer3[-1].conv3.out_channels,
+            out_channels=32,
             kernel_size=3,
             padding=1)
         conv_8 = nn.Conv2d(
-            in_channels=conv_7.out_features,
+            in_channels=conv_7.out_channels,
             out_channels=4,
             kernel_size=3,
             padding=1)
         deconv_3 = nn.ConvTranspose2d(
-            in_channels=conv_8.out_features,
+            in_channels=conv_8.out_channels,
             out_channels=4,
             stride=4,
             kernel_size=8)
@@ -126,17 +127,17 @@ class CobNetOrientationModule(nn.Module):
 
         # From scale 4
         conv_9 = nn.Conv2d(
-            in_channels=self.base_model.model.layer4,
-            out_channels=4,
+            in_channels=self.base_model.model.layer4[-1].conv3.out_channels,
+            out_channels=32,
             kernel_size=3,
             padding=1)
         conv_10 = nn.Conv2d(
-            in_channels=conv_9.out_features,
+            in_channels=conv_9.out_channels,
             out_channels=4,
             kernel_size=3,
             padding=1)
         deconv_3 = nn.ConvTranspose2d(
-            in_channels=conv_10.out_features,
+            in_channels=conv_10.out_channels,
             out_channels=4,
             stride=16,
             kernel_size=32)
@@ -144,11 +145,14 @@ class CobNetOrientationModule(nn.Module):
         model[4] = [conv_9, conv_10, deconv_3]
 
         # transform to sequential models
-        for s in model.keys():
-            model[s] = nn.Sequential(*model[s])
+        for k in model.keys():
+            model[k] = nn.Sequential(*model[k])
 
-        for m,_ in model.items():
-            nn.init.normal(m, mean=0, std=0.01)
+        #initialize convolutional layers
+        for _,m in model.items():
+            for t in m:
+                if(isinstance(t, nn.Conv2d)):
+                    nn.init.normal_(t.weight, mean=0, std=0.01)
 
         return model
 
