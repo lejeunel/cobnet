@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 from skimage.transform import resize
 from dataloader import CobDataLoader
 from cobnet_orientation import CobNetOrientationModule
+from cobnet_fuse import CobNetFuseModule
 
 # Model for Convolutional Oriented Boundaries
 # Needs a base model (vgg, resnet, ...) from which intermediate
@@ -28,7 +29,6 @@ class CobNet(nn.Module):
                  truth_paths_train=None,
                  img_paths_val=None,
                  truth_paths_val=None,
-                 transform=None,
                  batch_size=4,
                  shuffle=True,
                  num_workers=0,
@@ -38,7 +38,21 @@ class CobNet(nn.Module):
                  cuda=False):
 
         super(CobNet, self).__init__()
-        self.base_model = MyResnet50(cuda=False, batch_size=batch_size)
+        self.base_model = MyResnet50(cuda=cuda, batch_size=batch_size)
+
+        # We add a "weight-fusion" layer that sum outputs
+        # of all side outputs to produce a global edge map
+        # Is there a bias term in xie et. al 2015?
+        self.fuse_model = CobNetFuseModule(self.base_model, (224, 224))
+
+        # Image preprocessing
+        # Trained on ImageNet where images are normalized by mean=[0.485, 0.456, 0.406] and std=[0.229, 0.224, 0.225].
+        # We use the same normalization statistics here.
+        self.transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=(0.485, 0.456, 0.406),
+                                std=(0.229, 0.224, 0.225))])
 
         self.n_orientations = n_orientations # Parameter K in maninis17
         self.max_angle_orientations = max_angle_orientations
@@ -51,15 +65,14 @@ class CobNet(nn.Module):
                                             self.n_orientations, dtype=int)
 
         self.orientation_modules = self.make_all_orientation_modules()
-        self.scale_modules = self.make_scale_layers()
 
         self.dataloader_train = CobDataLoader(img_paths_train,
                                               truth_paths_train,
-                                              transform)
+                                              self.transform)
 
         self.dataloader_val = CobDataLoader(img_paths_val,
                                             truth_paths_val,
-                                            transform)
+                                            self.transform)
 
         self.dataloaders = {'train': DataLoader(self.dataloader_train,
                                                 batch_size=batch_size,
@@ -69,17 +82,6 @@ class CobNet(nn.Module):
                                               batch_size=batch_size,
                                               shuffle=shuffle,
                                               num_workers=num_workers)}
-        for i, sample in enumerate(self.dataloader_train):
-            print(sample[0].size(), sample[1].size())
-
-            if i == 3:
-                break
-
-        for i, sample in enumerate(self.dataloader_val):
-            print(sample[0].size(), sample[1].size())
-
-            if i == 3:
-                break
 
         self.device = torch.device("cuda:0" if cuda \
                                    else "cpu")
@@ -95,7 +97,6 @@ class CobNet(nn.Module):
         dict_ = dict()
         dict_['base_model'] = self.base_model
         dict_['orientation_modules'] = self.orientation_modules
-        dict_['scale_modules'] = self.scale_modules
 
         return dict_
 
@@ -109,11 +110,8 @@ class CobNet(nn.Module):
 
         self.base_model.train()
 
-        for m in self.orientation_modules:
+        for _,m in self.orientation_modules.items():
             m.train()
-
-        for k, v in self.scale_modules.items():
-            v.train()
 
     def eval_mode(self):
 
@@ -125,50 +123,32 @@ class CobNet(nn.Module):
 
         models_orient = dict()
         for orient in self.orientation_keys:
-            m_ = CobNetOrientationModule(self.base_model, orient)
+            m_ = CobNetOrientationModule(self.base_model,
+                                         orient,
+                                         (224, 224))
             models_orient[orient] = m_
 
         return models_orient
 
-    def make_scale_layers(self):
-        # Build dictionaries of per-scale sigmoid layers
-        # These layers are supervised individually
-        
-        modules = dict()
-        for s in range(5):
-            modules[s] = nn.Sequential(*[nn.Sigmoid()])
-
-        return modules
-
 
     def forward(self, im):
         # im: Input image (Tensor)
-        # target_scale: Truths for all scales (ResNet part)
+        # target_sides: Truths for all side outputs (ResNet part)
         # target_orient: Truths for all orientations (Orientation modules)
 
         # Pass through resnet
-        outputs = self.base_model(im)
-
-        # Get tensors at output layers for each scale
-        # Each output is supervised separately
-        conv1_out = outputs[0]
-        layer1_out = outputs[1]
-        layer2_out = outputs[2]
-        layer3_out = outputs[3]
-        layer4_out = outputs[4]
+        self.base_model(im)
 
         # Store tensors in dictionary
-        y_scale = {0: self.scale_modules[0](conv1_out),
-                   1: self.scale_modules[1](layer1_out),
-                   2: self.scale_modules[2](layer2_out),
-                   3: self.scale_modules[3](layer3_out),
-                   4: self.scale_modules[4](layer4_out)}
+        y_sides = {l:self.base_model.output_tensor(l) for l in range(5)}
 
-        y_orient = dict() # This stores one output per orientation module
-        for orient in self.orientation_keys:
-            y_orient[orient] = self.orientation_modules[orient](im)
+        y_fuse = self.fuse_model(y_sides)
 
-        return y_scale, y_orient
+        #y_orient = dict() # This stores one output per orientation module
+        #for orient in self.orientation_keys:
+        #    y_orient[orient] = self.orientation_modules[orient](outputs)
+
+        return y_sides, y_fuse
 
     def forward_on_module(self, x, im, orientation):
         # Forward pass of dict of tensors x.
@@ -293,29 +273,46 @@ class CobNetLoss(nn.Module):
         super(CobNetLoss, self).__init__()
 
 
-    def forward(self, y_scale, target_scale=None):
+    def forward(self, y_sides, y_fused,
+                target_sides=None,
+                target_fused=None):
         # im: Input image (Tensor)
-        # target_scale: Truths for all scales (ResNet part)
+        # target_sides: Truths for all scales (ResNet part)
         # target_orient: Truths for all orientations (Orientation modules)
 
 
-        # make transforms to resize target to size of y_scale[s]
-        resize_transf = {s: transforms.Resize(y_scale[s].shape[-2:])
-                         for s in y_scale.keys()}
-        loss_scales = 0
-        if(target_scale is not None):
-            for s in y_scale.keys():
+        # make transforms to resize target to size of y_sides[s]
+        import pdb; pdb.set_trace()
+        resize_transf = {s: transforms.Resize(y_sides[s].shape[-2:])
+                         for s in y_sides.keys()}
+        loss_sides = 0
+        if(target_sides is not None):
+            for s in y_sides.keys():
                 # beta is for class imbalance
-                t_  = resize_transf[s](target_scale[s])
-                beta = torch.sum(t_)/np.prod(y_scale[s].shape)
+                t_  = resize_transf[s](target_sides[s])
+                beta = torch.sum(t_)/np.prod(y_sides[s].shape)
                 idx_pos = torch.where(t_ > 0)
                 idx_neg = torch.where(t_ == 0)
-                loss_scales += -beta*torch.sum(y_scale[s][idx_pos]) \
-                    -(1-beta)*torch.sum(y_scale[s][idx_neg])
+                loss_scales += -beta*torch.sum(y_sides[s][idx_pos]) \
+                    -(1-beta)*torch.sum(y_sides[s][idx_neg])
+
+        # Compute loss for fused edge map
+        loss_fuse = 0
+        # make transforms to resize target to size of y_fused
+        resize_transf = transforms.Resize(y_fused.shape[-2:])
+
+        if(target_fused is not None):
+            # beta is for class imbalance
+            t_  = resize_transf(target_fused)
+            beta = torch.sum(t_)/np.prod(y_fused.shape)
+            idx_pos = torch.where(t_ > 0)
+            idx_neg = torch.where(t_ == 0)
+            loss_fuse = -beta*torch.sum(y_fused[idx_pos]) \
+                -(1-beta)*torch.sum(y_fused[idx_neg])
 
 
         #y_orient = dict() # This stores one output per orientation module
         #for orient in self.orientation_keys:
         #    y_orient[orient] = self.forward_on_module(y_scale, im, orient)
 
-        return loss_scales
+        return loss_sides + loss_fuse

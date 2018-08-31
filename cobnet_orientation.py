@@ -1,28 +1,47 @@
 import torch.nn as nn
 
 class CobNetOrientationModule(nn.Module):
-    def __init__(self, base_model, orientation):
+    def __init__(self, base_model, orientation, out_shape):
 
         super(CobNetOrientationModule, self).__init__()
+
         # This is the resnet50
         # Calling its forward function returns outputs of 5 scale block
         # This will give the inputs of the layers (one per scale)
         self.base_model = base_model
+
+        self.out_shape = out_shape
 
         self.orientation = orientation
 
         # Build it
         self.models = self.make_models()
         self.out_model = self.make_output_model()
+
+    def train(self):
+        for _,m in self.models.items():
+            m.train()
+
+        self.out_model.train()
+        
+    def eval(self):
+        for s in self.models.keys():
+            self.models[s].eval()
+
+        self.out_model.eval()
         
     def forward(self, x):
 
+        import pdb; pdb.set_trace()
         outputs = dict()
         for s in self.models.keys():
+            outputs[s] = self.models[s](x[s])
+
+        #crop all outputs
+        for s in outputs.keys():
             outputs[s] = self.models[s](x)
 
-        #Concatenate all outputs
-        cat_outputs = torch.cat([v for v,_ in outputs.items()])
+        #cat_outputs = torch.cat([v for v,_ in outputs.items()])
 
         return self.out_model(cat_outputs)
 

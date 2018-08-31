@@ -28,6 +28,19 @@ class MyResnet50(nn.Module):
         if(cuda):
             self.model.cuda()
 
+        self.side0_shape = (self.batch_size, 64, 112, 112)
+        self.side1_shape = (self.batch_size, 256, 56, 56)  
+        self.side2_shape = (self.batch_size, 512, 28, 28)  
+        self.side3_shape = (self.batch_size, 1024, 14, 14) 
+        self.side4_shape = (self.batch_size, 2048, 7, 7) 
+
+        # Initialize tensors
+        self.side0_out = torch.zeros(self.side0_shape)
+        self.side1_out = torch.zeros(self.side1_shape)
+        self.side2_out = torch.zeros(self.side2_shape)
+        self.side3_out = torch.zeros(self.side3_shape)
+        self.side4_out = torch.zeros(self.side4_shape)
+
         # Remove avg pool and classification layer (fc)
         #self.model = nn.Sequential(*list(self.model.children())[:-2])
 
@@ -35,49 +48,88 @@ class MyResnet50(nn.Module):
         #for param in self.model.parameters():
         #    param.requires_grad = False
 
+    def output_tensor_shape(self, idx):
+        if(idx == 0):
+            return self.side0_shape
+        elif(idx == 1):
+            return self.side1_shape
+        elif(idx == 2):
+            return self.side2_shape
+        elif(idx == 3):
+            return self.side3_shape
+        elif(idx == 4):
+            return self.side4_shape
+        else:
+            raise ValueError('Bad output layer requested in MyResNet50.')
+
     def hook(module, input, output):
         outputs.append(output)
 
-    def forward(self, x):
-    #    # Returns outputs of conv1 and layer{1, ..., 4}
+    def output_layer(self, idx):
+        if(idx == 0):
+            return self.model.conv1
+        elif(idx == 1):
+            return self.model.layer1[-1].conv3
+        elif(idx == 2):
+            return self.model.layer2[-1].conv3
+        elif(idx == 3):
+            return self.model.layer3[-1].conv3
+        elif(idx == 4):
+            return self.model.layer4[-1].conv3
+        else:
+            raise ValueError('Bad output layer requested in MyResNet50.')
 
-        # Initialize tensors
-        conv1_out = torch.zeros((self.batch_size, 64, 112, 112))
-        layer1_out = torch.zeros((self.batch_size, 256, 56, 56))
-        layer2_out = torch.zeros((self.batch_size, 512, 28, 28))
-        layer3_out = torch.zeros((self.batch_size, 1024, 14, 14))
-        layer4_out = torch.zeros((self.batch_size, 2048, 7, 7))
+    def output_tensor(self, idx):
+        if(idx == 0):
+            return self.side0_out
+        elif(idx == 1):
+            return self.side1_out
+        elif(idx == 2):
+            return self.side2_out
+        elif(idx == 3):
+            return self.side3_out
+        elif(idx == 4):
+            return self.side4_out
+        else:
+            raise ValueError('Bad output tensor requested in MyResNet50.')
+
+    def forward(self, x):
+        # Returns outputs of conv1 and layer{1, ..., 4}
 
         # Set hooks
-        def copy_conv1_data(m, i, o):
-            conv1_out.copy_(o.data)
-        def copy_layer1_data(m, i, o):
-            layer1_out.copy_(o.data)
-        def copy_layer2_data(m, i, o):
-            layer2_out.copy_(o.data)
-        def copy_layer3_data(m, i, o):
-            layer3_out.copy_(o.data)
-        def copy_layer4_data(m, i, o):
-            layer4_out.copy_(o.data)
+        def copy_side0_data(m, i, o):
+            self.side0_out.copy_(o.data)
+        def copy_side1_data(m, i, o):
+            self.side1_out.copy_(o.data)
+        def copy_side2_data(m, i, o):
+            self.side2_out.copy_(o.data)
+        def copy_side3_data(m, i, o):
+            self.side3_out.copy_(o.data)
+        def copy_side4_data(m, i, o):
+            self.side4_out.copy_(o.data)
 
         # Attach hooks
-        h_conv1 = self.model.conv1.register_forward_hook(copy_conv1_data)
-        h_layer1 = self.model.layer1.register_forward_hook(copy_layer1_data)
-        h_layer2 = self.model.layer2.register_forward_hook(copy_layer2_data)
-        h_layer3 = self.model.layer3.register_forward_hook(copy_layer3_data)
-        h_layer4 = self.model.layer4.register_forward_hook(copy_layer4_data)
+        h_side0 = self.output_layer(0).register_forward_hook(copy_side0_data)
+        h_side1 = self.output_layer(1).register_forward_hook(copy_side1_data)
+        h_side2 = self.output_layer(2).register_forward_hook(copy_side2_data)
+        h_side3 = self.output_layer(3).register_forward_hook(copy_side3_data)
+        h_side4 = self.output_layer(4).register_forward_hook(copy_side4_data)
 
         # Pass input through model
         self.model(x)
 
         # Detach copy functions
-        h_conv1.remove()
-        h_layer1.remove()
-        h_layer2.remove()
-        h_layer3.remove()
-        h_layer4.remove()
+        h_side0.remove()
+        h_side1.remove()
+        h_side2.remove()
+        h_side3.remove()
+        h_side4.remove()
 
-        return [conv1_out, layer1_out, layer2_out, layer3_out, layer4_out]
+        return [self.side0_out,
+                self.side1_out,
+                self.side2_out,
+                self.side3_out,
+                self.side4_out]
 
     def single_stage_loss(self, y_pred, y_true):
 

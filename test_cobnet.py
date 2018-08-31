@@ -23,16 +23,6 @@ root_dir = os.path.join('/home',
 image_paths = sorted(glob.glob(os.path.join(root_dir, 'images','*', '*.jpg')))
 truth_paths = sorted(glob.glob(os.path.join(root_dir, 'groundTruth','*', '*.mat')))
 
-# Image preprocessing
-# Trained on ImageNet where images are normalized by mean=[0.485, 0.456, 0.406] and std=[0.229, 0.224, 0.225].
-# We use the same normalization statistics here.
-transform = transforms.Compose([
-    transforms.Resize((224, 224)),
-    transforms.ToTensor(),
-    transforms.Normalize(mean=(0.485, 0.456, 0.406),
-                         std=(0.229, 0.224, 0.225))])
-
-
 #test = utls.load_boundaries_bsds(truth_paths[0])
 
 train_val_ratio = .9
@@ -49,8 +39,7 @@ truths_val = truth_paths[val_idx[0]:val_idx[1]]
 mycobnet = CobNet(img_paths_train=images_train,
                   truth_paths_train=truths_train,
                   img_paths_val=images_val,
-                  truth_paths_val=truths_val,
-                  transform=transform)
+                  truth_paths_val=truths_val)
 
 mycobnet.train()
 
