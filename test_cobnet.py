@@ -5,12 +5,10 @@ from torch import nn
 import os
 import glob
 import utils as utls
-import requests
 import pickle as pk
 import numpy as np
 from skimage import io
 from cobnet import CobNet
-
 
 model_path = os.path.join('models', 'resnet50.pth')
 root_dir = os.path.join('/home',
@@ -24,6 +22,8 @@ image_paths = sorted(glob.glob(os.path.join(root_dir, 'images','*', '*.jpg')))
 truth_paths = sorted(glob.glob(os.path.join(root_dir, 'groundTruth','*', '*.mat')))
 
 #test = utls.load_boundaries_bsds(truth_paths[0])
+
+cuda=False
 
 train_val_ratio = .9
 n_train_smpls = int(len(image_paths)*train_val_ratio)
@@ -39,7 +39,8 @@ truths_val = truth_paths[val_idx[0]:val_idx[1]]
 mycobnet = CobNet(img_paths_train=images_train,
                   truth_paths_train=truths_train,
                   img_paths_val=images_val,
-                  truth_paths_val=truths_val)
+                  truth_paths_val=truths_val,
+                  cuda=cuda)
 
 mycobnet.train()
 

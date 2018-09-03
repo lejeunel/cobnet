@@ -28,20 +28,20 @@ class MyResnet50(nn.Module):
         if(cuda):
             self.model.cuda()
 
-        self.side0_shape = (self.batch_size, 64, 112, 112)
-        self.side1_shape = (self.batch_size, 256, 56, 56)  
-        self.side2_shape = (self.batch_size, 512, 28, 28)  
-        self.side3_shape = (self.batch_size, 1024, 14, 14) 
-        self.side4_shape = (self.batch_size, 2048, 7, 7) 
+        self.side_shape = list()
+        self.side_shape.append((self.batch_size, 64, 112, 112))
+        self.side_shape.append((self.batch_size, 256, 56, 56))
+        self.side_shape.append((self.batch_size, 512, 28, 28))
+        self.side_shape.append((self.batch_size, 1024, 14, 14))
+        self.side_shape.append((self.batch_size, 2048, 7, 7))
+
 
         # Initialize tensors
-        self.side0_out = torch.zeros(self.side0_shape)
-        self.side1_out = torch.zeros(self.side1_shape)
-        self.side2_out = torch.zeros(self.side2_shape)
-        self.side3_out = torch.zeros(self.side3_shape)
-        self.side4_out = torch.zeros(self.side4_shape)
+        self.side_out = [torch.zeros(s) for s in self.side_shape]
 
-        # Remove avg pool and classification layer (fc)
+        # freeze all layers
+        for param in self.model.parameters():
+            param.requires_grad = False
         #self.model = nn.Sequential(*list(self.model.children())[:-2])
 
         # Freeze parameters as we don't backprop on it
@@ -49,18 +49,10 @@ class MyResnet50(nn.Module):
         #    param.requires_grad = False
 
     def output_tensor_shape(self, idx):
-        if(idx == 0):
-            return self.side0_shape
-        elif(idx == 1):
-            return self.side1_shape
-        elif(idx == 2):
-            return self.side2_shape
-        elif(idx == 3):
-            return self.side3_shape
-        elif(idx == 4):
-            return self.side4_shape
-        else:
+        if(idx < 0 | idx > 4):
             raise ValueError('Bad output layer requested in MyResNet50.')
+        else:
+            return self.side_shape[idx]
 
     def hook(module, input, output):
         outputs.append(output)
@@ -80,33 +72,25 @@ class MyResnet50(nn.Module):
             raise ValueError('Bad output layer requested in MyResNet50.')
 
     def output_tensor(self, idx):
-        if(idx == 0):
-            return self.side0_out
-        elif(idx == 1):
-            return self.side1_out
-        elif(idx == 2):
-            return self.side2_out
-        elif(idx == 3):
-            return self.side3_out
-        elif(idx == 4):
-            return self.side4_out
-        else:
+        if(idx < 0 | idx > 4):
             raise ValueError('Bad output tensor requested in MyResNet50.')
+        else:
+            return self.side_out[idx]
 
     def forward(self, x):
         # Returns outputs of conv1 and layer{1, ..., 4}
 
         # Set hooks
         def copy_side0_data(m, i, o):
-            self.side0_out.copy_(o.data)
+            self.side_out[0].copy_(o.data)
         def copy_side1_data(m, i, o):
-            self.side1_out.copy_(o.data)
+            self.side_out[1].copy_(o.data)
         def copy_side2_data(m, i, o):
-            self.side2_out.copy_(o.data)
+            self.side_out[2].copy_(o.data)
         def copy_side3_data(m, i, o):
-            self.side3_out.copy_(o.data)
+            self.side_out[3].copy_(o.data)
         def copy_side4_data(m, i, o):
-            self.side4_out.copy_(o.data)
+            self.side_out[4].copy_(o.data)
 
         # Attach hooks
         h_side0 = self.output_layer(0).register_forward_hook(copy_side0_data)
@@ -125,11 +109,7 @@ class MyResnet50(nn.Module):
         h_side3.remove()
         h_side4.remove()
 
-        return [self.side0_out,
-                self.side1_out,
-                self.side2_out,
-                self.side3_out,
-                self.side4_out]
+        return self.side_out
 
     def single_stage_loss(self, y_pred, y_true):
 

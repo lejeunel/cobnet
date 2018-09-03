@@ -1,3 +1,4 @@
+from torchvision import transforms
 from torch.utils.data import Dataset, DataLoader
 import utils as utls
 import numpy
@@ -10,17 +11,33 @@ class CobDataLoader(Dataset):
 
     def __init__(self,
                  img_paths,
-                 truth_paths=None,
-                 transform=None):
+                 shapes_of_sides,
+                 shape_of_base,
+                 mean_norm_base,
+                 std_norm_base,
+                 truth_paths=None):
         """
         Args:
-            transform (callable, optional): Optional transform to be applied
-                on a sample.
         """
 
         self.img_paths = img_paths
         self.truth_paths = truth_paths
-        self.transform = transform
+
+        self.shapes_of_sides = shapes_of_sides
+
+        self.im_transform = transforms.Compose([
+            transforms.Resize(shape_of_base),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=mean_norm_base,
+                                 std=std_norm_base)])
+
+        self.truth_transform_fuse = transforms.Compose([
+            transforms.Resize(shape_of_base),
+            transforms.ToTensor()])
+
+        self.truth_transforms_sides = [transforms.Compose([
+            transforms.Resize((w, h)),
+            transforms.ToTensor()]) for w,h in self.shapes_of_sides]
 
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -30,8 +47,7 @@ class CobDataLoader(Dataset):
     def __getitem__(self, idx):
         img_path = self.img_paths[idx]
 
-        img = utls.load_image(img_path,
-                                transform=self.transform)
+        img = utls.load_image(img_path, self.im_transform).to(self.device)
 
         if(self.truth_paths is not None):
             truth_path = self.truth_paths[idx]
@@ -41,9 +57,9 @@ class CobDataLoader(Dataset):
             gt = gts[np.random.choice(len(gts))]
             gt = Image.fromarray(np.uint8(gt*255))
 
-            if self.transform:
-                gt = self.transform(gt)
+            gts_sides = [trf(gt).to(self.device)
+                         for trf in self.truth_transforms_sides]
 
-            gt = gt.to(self.device)
+            gt_fuse = self.truth_transform_fuse(gt)
 
-        return img, gt
+        return img, gts_sides, gt_fuse

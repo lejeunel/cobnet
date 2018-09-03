@@ -30,7 +30,6 @@ def load_image(image_path, transform=None):
     import torch.nn as nn
     from torch.autograd import Variable
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     """Load an image and convert it to a torch tensor."""
 
     image = Image.open(image_path)
@@ -38,8 +37,7 @@ def load_image(image_path, transform=None):
     if transform:
         image = transform(image)
 
-    #return Variable(image.to(device))
-    return image.to(device)
+    return image
 
 def crop_and_concat(self, upsampled, bypass, crop=False):
     if crop:
