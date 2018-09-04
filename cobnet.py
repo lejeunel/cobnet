@@ -17,6 +17,7 @@ from skimage.transform import resize
 from dataloader import CobDataLoader
 from cobnet_orientation import CobNetOrientationModule
 from cobnet_fuse import CobNetFuseModule
+import pandas as pd
 
 # Model for Convolutional Oriented Boundaries
 # Needs a base model (vgg, resnet, ...) from which intermediate
@@ -29,13 +30,14 @@ class CobNet(nn.Module):
                  truth_paths_train=None,
                  img_paths_val=None,
                  truth_paths_val=None,
-                 batch_size=4,
+                 batch_size=1,
                  shuffle=True,
                  num_workers=0,
-                 num_epochs=20,
-                 lr=0.001,
+                 num_epochs=2,
+                 lr=0.01,
                  momentum=0.9,
-                 cuda=False):
+                 cuda=False,
+                 save_path='checkpoints'):
 
         super(CobNet, self).__init__()
         self.base_model = MyResnet50(cuda=cuda, batch_size=batch_size)
@@ -51,7 +53,8 @@ class CobNet(nn.Module):
         # of all side outputs to produce a global edge map
         # Is there a bias term in xie et. al 2015?
         self.fuse_model = CobNetFuseModule(self.base_model,
-                                           np.asarray(self.base_shape)//2)
+                                           np.asarray(self.base_shape)//2,
+                                           cuda=cuda)
 
         self.shapes_of_sides = [self.base_model.output_tensor_shape(i)[-2:]
                                 for i in range(5)]
@@ -90,8 +93,8 @@ class CobNet(nn.Module):
                                               shuffle=shuffle,
                                               num_workers=num_workers)}
 
-        self.device = torch.device("cuda:0" if cuda \
-                                   else "cpu")
+        #self.device = torch.device("cuda:0" if cuda \
+        #                           else "cpu")
 
         self.criterion = CobNetLoss()
         self.num_epochs = num_epochs
@@ -103,7 +106,8 @@ class CobNet(nn.Module):
 
         dict_ = dict()
         dict_['base_model'] = self.base_model
-        dict_['orientation_modules'] = self.orientation_modules
+        dict_['fuse_model'] = self.fuse_model
+        #dict_['orientation_modules'] = self.orientation_modules
 
         return dict_
 
@@ -112,6 +116,29 @@ class CobNet(nn.Module):
         dict_ = {k:copy.deepcopy(v)
                  for k,v in self.get_all_modules_as_dict().items()}
         return dict_
+
+    def load_state_dict(self, dict_):
+
+        self.base_model.load_state_dict(dict_['resnet'])
+        self.fuse_model.load_state_dict(dict_['fuse'])
+
+    def state_dict(self):
+
+        return {'resnet': self.base_model.state_dict(),
+                'fuse': self.fuse_model.state_dict()}
+
+    def load(self, path):
+
+        self.base_model.load(path)
+        self.fuse_model.load(path)
+
+    def save(self, save_dir):
+
+        if(not os.path.exists(save_dir)):
+            os.makedirs(save_dir)
+
+        self.base_model.save(save_dir)
+        self.fuse_model.save(save_dir)
 
     def train_mode(self):
 
@@ -143,7 +170,6 @@ class CobNet(nn.Module):
         # target_orient: Truths for all orientations (Orientation modules)
 
         # Pass through resnet
-        import pdb; pdb.set_trace()
         self.base_model(im)
 
         # Store tensors in dictionary
@@ -203,16 +229,19 @@ class CobNet(nn.Module):
         since = time.time()
 
         best_model_wts = self.deepcopy()
-        best_acc = 0.0
+        best_val_loss = float("inf")
 
         # Observe that all parameters are being optimized
         optimizer = optim.SGD(self.fuse_model.get_params(),
                               momentum=self.momentum)
 
-        import pdb; pdb.set_trace()
+        loss_dict = dict()
+
         for epoch in range(self.num_epochs):
             print('Epoch {}/{}'.format(epoch, self.num_epochs - 1))
             print('-' * 10)
+
+            loss_dict[epoch] = dict()
 
             # Each epoch has a training and validation phase
             for phase in ['train', 'val']:
@@ -226,6 +255,7 @@ class CobNet(nn.Module):
                 running_corrects = 0
 
                 # Iterate over data.
+                samp = 1
                 for inputs, labels_sides, labels_fuse in self.dataloaders[phase]:
 
                     # zero the parameter gradients
@@ -235,6 +265,7 @@ class CobNet(nn.Module):
                     # track history if only in train
                     with torch.set_grad_enabled(phase == 'train'):
                         outputs_sides, outputs_fuse = self.forward(inputs)
+
                         loss = self.criterion(outputs_sides,
                                               outputs_fuse,
                                               labels_sides,
@@ -246,34 +277,41 @@ class CobNet(nn.Module):
                             optimizer.step()
 
                     # statistics
-                    running_loss += loss.item() * inputs.size(0)
+                    running_loss = loss.item() * inputs.size(0)
+                    print('{}/{}: loss: {:.4f}'.format(samp,
+                                                   len(self.dataloaders[phase]),
+                                                   running_loss))
+                    loss_dict[epoch][samp] = running_loss
+                    samp += 1
 
-                epoch_loss = running_loss / dataset_sizes[phase]
-                epoch_acc = running_corrects.double() / dataset_sizes[phase]
+                epoch_loss = running_loss / len(self.dataloaders[phase])
 
-                print('{} Loss: {:.4f} Acc: {:.4f}'.format(
-                    phase, epoch_loss, epoch_acc))
+                print('{} Loss: {:.4f}'.format(
+                    phase, epoch_loss))
 
                 # deep copy the model
-                if phase == 'val' and epoch_acc > best_acc:
-                    best_acc = epoch_acc
-                    best_model_wts = copy.deepcopy(model.state_dict())
+                if phase == 'val' and (epoch_loss < best_loss):
+                    best_loss = epoch_loss
+                    best_model = copy.deepcopy(model.state_dict())
 
             print()
 
         time_elapsed = time.time() - since
         print('Training complete in {:.0f}m {:.0f}s'.format(
             time_elapsed // 60, time_elapsed % 60))
-        print('Best val Acc: {:4f}'.format(best_acc))
+        print('Best loss: {:4f}'.format(best_loss))
 
         # load best model weights
-        model.load_state_dict(best_model_wts)
+        model.load_state_dict(best_model)
         return model
 
 class CobNetLoss(nn.Module):
 
-    def __init__(self):
+    def __init__(self, cuda=True):
         super(CobNetLoss, self).__init__()
+
+        self.device = torch.device("cuda:0" if cuda \
+                                   else "cpu")
 
 
     def forward(self, y_sides, y_fused,
@@ -283,42 +321,51 @@ class CobNetLoss(nn.Module):
         # target_sides: Truths for all scales (ResNet part)
         # target_orient: Truths for all orientations (Orientation modules)
 
-
         # make transforms to resize target to size of y_sides[s]
-        resize_transf = {s: transforms.Compose(
-            [transforms.ToPILImage(),
-             transforms.Resize(y_sides[s].shape[-2:]),
-             transforms.ToTensor()])
-                         for s in y_sides.keys()}
+        shape_input = y_sides[0].shape[-2:]
+        n_elems_inputs = torch.prod(torch.Tensor([shape_input]))
+        n_elems_inputs = n_elems_inputs.to(self.device)
 
-        loss_sides = 0
+        #resize_trgt = {k: transforms.Compose(
+        #    [transforms.ToPILImage(),
+        #     transforms.Resize(v),
+        #     transforms.ToTensor()])
+        #                 for k,v in shape_inputs.items()}
+
+        loss_sides = torch.Tensor([0]).to(self.device)
         if(target_sides is not None):
             for s in y_sides.keys():
 
                 # Apply transform to batch
-                t_  = [resize_transf[s](target_sides[s][b, ...])
-                        for b in range(target_sides[s].shape[0])]
-                #t_ = torch.cat(t_).unsqueeze(1)
-                t_ = np.asarray(torch.cat(t_))
+                #t_  = [resize_trgt[s](target_sides[s][b, ...])
+                #        for b in range(target_sides[s].shape[0])]
+                t_ = torch.cat([target_sides[s][b, ...]
+                                for b in range(target_sides[s].shape[0])])
 
                 # beta is for class imbalance
-                beta = np.sum(t_)/np.prod(y_sides[s].shape)
+                beta = torch.sum(t_).div(n_elems_inputs)
                 idx_pos = t_ > 0
-                loss_sides += -beta*np.sum(y_sides[s][idx_pos]) \
-                    -(1-beta)*np.sum(y_sides[s][~idx_pos])
+                loss_sides += -beta*torch.sum(y_sides[s][np.where(idx_pos)]) \
+                    -(1-beta)*torch.sum(y_sides[s][np.where(~idx_pos)])
 
         # Compute loss for fused edge map
-        loss_fuse = 0
+        loss_fuse = torch.Tensor([0]).to(self.device)
         # make transforms to resize target to size of y_fused
-        resize_transf = transforms.Resize(y_fused.shape[-2:])
+        #resize_transf = transforms.Compose([
+        #    transforms.ToPILImage(),
+        #    transforms.Resize(y_fused.shape[-2:]),
+        #    transforms.ToTensor()])
 
         if(target_fused is not None):
             # beta is for class imbalance
-            t_  = resize_transf(target_fused)
-            beta = np.sum(t_)/np.prod(y_fused.shape)
+            #t_  = [resize_transf(target_fused[b, ...])
+            #        for b in range(target_fused.shape[0])]
+            t_  = torch.cat([target_fused[b, ...]
+                    for b in range(target_fused.shape[0])])
+            beta = torch.sum(t_).div(n_elems_inputs)
             idx_pos = t_ > 0
-            loss_fuse = -beta*np.sum(y_fused[idx_pos]) \
-                -(1-beta)*torch.sum(y_fused[~idx_pos])
+            loss_fuse = -beta*torch.sum(y_fused[np.where(idx_pos)]) \
+                -(1-beta)*torch.sum(y_fused[np.where(~idx_pos)])
 
         #y_orient = dict() # This stores one output per orientation module
         #for orient in self.orientation_keys:

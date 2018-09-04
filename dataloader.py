@@ -32,7 +32,7 @@ class CobDataLoader(Dataset):
                                  std=std_norm_base)])
 
         self.truth_transform_fuse = transforms.Compose([
-            transforms.Resize(shape_of_base),
+            transforms.Resize(np.asarray(shape_of_base)//2),
             transforms.ToTensor()])
 
         self.truth_transforms_sides = [transforms.Compose([
@@ -48,6 +48,7 @@ class CobDataLoader(Dataset):
         img_path = self.img_paths[idx]
 
         img = utls.load_image(img_path, self.im_transform).to(self.device)
+        img.requires_grad = True
 
         if(self.truth_paths is not None):
             truth_path = self.truth_paths[idx]
@@ -60,6 +61,6 @@ class CobDataLoader(Dataset):
             gts_sides = [trf(gt).to(self.device)
                          for trf in self.truth_transforms_sides]
 
-            gt_fuse = self.truth_transform_fuse(gt)
+            gt_fuse = self.truth_transform_fuse(gt).to(self.device)
 
         return img, gts_sides, gt_fuse

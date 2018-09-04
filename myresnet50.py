@@ -16,6 +16,9 @@ class MyResnet50(nn.Module):
 
         super(MyResnet50, self).__init__()
 
+        device = torch.device("cuda:0" if cuda \
+                                   else "cpu")
+
         self.batch_size = batch_size
 
         # Download original pre-trained Resnet50 if not given
@@ -35,18 +38,30 @@ class MyResnet50(nn.Module):
         self.side_shape.append((self.batch_size, 1024, 14, 14))
         self.side_shape.append((self.batch_size, 2048, 7, 7))
 
-
         # Initialize tensors
-        self.side_out = [torch.zeros(s) for s in self.side_shape]
+        self.side_out = [torch.zeros(s).to(device) for s in self.side_shape]
 
         # freeze all layers
-        for param in self.model.parameters():
-            param.requires_grad = False
-        #self.model = nn.Sequential(*list(self.model.children())[:-2])
-
-        # Freeze parameters as we don't backprop on it
         #for param in self.model.parameters():
         #    param.requires_grad = False
+
+    def state_dict(self):
+        return self.model.state_dict()
+
+    def load_state_dict(self, dict_):
+
+        self.model.load_state_dict(dict_)
+
+    def load(self, save_dir):
+
+        self.model.load_state_dict(
+            torch.load(
+                os.path.join(save_dir,'resnet.pth')))
+
+    def save(self, save_dir):
+
+        torch.save(self.model.state_dict(),
+                   os.path.join(save_dir,'resnet.pth'))
 
     def output_tensor_shape(self, idx):
         if(idx < 0 | idx > 4):

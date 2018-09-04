@@ -42,6 +42,8 @@ mycobnet = CobNet(img_paths_train=images_train,
                   truth_paths_val=truths_val,
                   cuda=cuda)
 
-mycobnet.train()
+dict_ = mycobnet.state_dict()
+mycobnet.load_state_dict(dict_)
+#mycobnet.train()
 
 #io.imsave('test.png', pred_)
