@@ -18,6 +18,8 @@ from dataloader import CobDataLoader
 from cobnet_orientation import CobNetOrientationModule
 from cobnet_fuse import CobNetFuseModule
 import pandas as pd
+import utils as utls
+from loss_logger import LossLogger
 
 # Model for Convolutional Oriented Boundaries
 # Needs a base model (vgg, resnet, ...) from which intermediate
@@ -33,7 +35,7 @@ class CobNet(nn.Module):
                  batch_size=1,
                  shuffle=True,
                  num_workers=0,
-                 num_epochs=2,
+                 num_epochs=20,
                  lr=0.01,
                  momentum=0.9,
                  cuda=False,
@@ -45,9 +47,13 @@ class CobNet(nn.Module):
         # Image preprocessing
         # Trained on ImageNet where images are normalized by mean=[0.485, 0.456, 0.406] and std=[0.229, 0.224, 0.225].
         # We use the same normalization statistics here.
+        self.batch_size = batch_size
         self.base_shape = (224, 224)
         self.base_mean_norm = [0.485, 0.456, 0.406]
         self.base_std_norm = [0.229, 0.224, 0.225]
+        self.save_path = save_path
+
+        self.lr = lr
 
         # We add a "weight-fusion" layer that sum outputs
         # of all side outputs to produce a global edge map
@@ -93,10 +99,10 @@ class CobNet(nn.Module):
                                               shuffle=shuffle,
                                               num_workers=num_workers)}
 
-        #self.device = torch.device("cuda:0" if cuda \
-        #                           else "cpu")
+        self.device = torch.device("cuda:0" if cuda \
+                                   else "cpu")
 
-        self.criterion = CobNetLoss()
+        self.criterion = CobNetLoss(cuda=cuda)
         self.num_epochs = num_epochs
         self.num_works = num_workers
         self.lr = lr
@@ -183,47 +189,12 @@ class CobNet(nn.Module):
 
         return Y_sides, Y_fused
 
-    def forward_on_module(self, x, im, orientation):
-        # Forward pass of dict of tensors x.
-        # Input image (PIL) im is concatenated
-        # Orientation is a key for orientation [0, 20, ..., 140]
+    def get_params(self):
 
-        mod_ = self.orientation_modules[orientation]
-        out_mod_ = self.output_modules[orientation]
+        params = [self.fuse_model.get_params(),
+                  self.base_model.get_params()]
 
-
-        width, height = im.shape[2:]
-        transform = transforms.Compose([
-            transforms.ToPILImage(),
-                    transforms.Resize((width//2, height//2)),
-                    transforms.ToTensor()])
-
-        im_resized = transform(im.squeeze(0)).unsqueeze(0)
-        width, height = im_resized.shape[2:]
-
-        # Forward pass on each layer and concat input image
-        # Keys are in 1, ..., 5
-        y = dict()
-        for key in x.keys():
-            y[key] = mod_[key](x[key])
-
-            # crop response
-            y_width = y[key].shape[-2]
-            y_height = y[key].shape[-1]
-            half_crop_size = (y_width - width)//2
-            y_resized = Variable(y[key])[:,:,
-                                         half_crop_size:y_width-half_crop_size,
-                                         half_crop_size:y_width-half_crop_size]
-
-            # Concatenate image tensor
-            y[key] = torch.cat((im_resized, y_resized), 1)
-
-        #Resize all to input image size
-        # Concatenate outputs of all modules
-        y_all = torch.cat([y[k] for k in y.keys()], 1)
-        y_all = out_mod_(y_all) # conv2d + sigmoid
-
-        return y_all
+        return params[0] + params[1]
 
     def train(self):
         since = time.time()
@@ -232,16 +203,25 @@ class CobNet(nn.Module):
         best_val_loss = float("inf")
 
         # Observe that all parameters are being optimized
-        optimizer = optim.SGD(self.fuse_model.get_params(),
-                              momentum=self.momentum)
+        optimizer = optim.SGD(self.get_params(),
+                              momentum=self.momentum,
+                              lr=self.lr)
 
-        loss_dict = dict()
+        train_logger = LossLogger('train',
+                                  self.batch_size,
+                                  len(self.dataloaders['train']),
+                                  self.save_path)
+
+        val_logger = LossLogger('val',
+                                self.batch_size,
+                                len(self.dataloaders['val']),
+                                self.save_path)
+
+        loggers = {'train': train_logger, 'val': val_logger}
 
         for epoch in range(self.num_epochs):
             print('Epoch {}/{}'.format(epoch, self.num_epochs - 1))
             print('-' * 10)
-
-            loss_dict[epoch] = dict()
 
             # Each epoch has a training and validation phase
             for phase in ['train', 'val']:
@@ -264,8 +244,8 @@ class CobNet(nn.Module):
                     # forward
                     # track history if only in train
                     with torch.set_grad_enabled(phase == 'train'):
+                        import pdb; pdb.set_trace()
                         outputs_sides, outputs_fuse = self.forward(inputs)
-
                         loss = self.criterion(outputs_sides,
                                               outputs_fuse,
                                               labels_sides,
@@ -276,34 +256,46 @@ class CobNet(nn.Module):
                             loss.backward()
                             optimizer.step()
 
-                    # statistics
-                    running_loss = loss.item() * inputs.size(0)
-                    print('{}/{}: loss: {:.4f}'.format(samp,
-                                                   len(self.dataloaders[phase]),
-                                                   running_loss))
-                    loss_dict[epoch][samp] = running_loss
+                    loggers[phase].update(epoch,
+                                          samp,
+                                          loss.item() * inputs.size(0))
+
                     samp += 1
 
-                epoch_loss = running_loss / len(self.dataloaders[phase])
+                loggers[phase].print_epoch(epoch)
 
-                print('{} Loss: {:.4f}'.format(
-                    phase, epoch_loss))
+                # Generate train prediction for check
+                if phase == 'train':
+                    path = os.path.join(self.save_path,
+                                        'previews',
+                                        'epoch_{}.jpg'.format(epoch))
+                    _, pred = self.forward(inputs)
+                    im_ = inputs[0, ...].detach().cpu()
+                    im_ = self.dataloader_train.im_inv_transform(im_)
+                    im_ = np.asarray(im_)
+                    utls.save_tensors(im_,
+                                      pred,
+                                      labels_fuse[0, ...],
+                                      path)
 
                 # deep copy the model
-                if phase == 'val' and (epoch_loss < best_loss):
-                    best_loss = epoch_loss
-                    best_model = copy.deepcopy(model.state_dict())
+                if phase == 'val' and (
+                        loggers['val'].get_loss(epoch) < best_val_loss):
+                    best_val_loss = loggers['val'].get_loss(epoch)
+                    best_model = copy.deepcopy(self.state_dict())
 
             print()
 
         time_elapsed = time.time() - since
         print('Training complete in {:.0f}m {:.0f}s'.format(
             time_elapsed // 60, time_elapsed % 60))
-        print('Best loss: {:4f}'.format(best_loss))
+        print('Best loss: {:4f}'.format(best_val_loss))
 
         # load best model weights
-        model.load_state_dict(best_model)
-        return model
+        print('Saving model with best validation loss')
+        self.load_state_dict(best_model)
+        self.save(self.save_path)
+        print('done.')
 
 class CobNetLoss(nn.Module):
 
@@ -312,7 +304,6 @@ class CobNetLoss(nn.Module):
 
         self.device = torch.device("cuda:0" if cuda \
                                    else "cpu")
-
 
     def forward(self, y_sides, y_fused,
                 target_sides=None,
@@ -324,13 +315,7 @@ class CobNetLoss(nn.Module):
         # make transforms to resize target to size of y_sides[s]
         shape_input = y_sides[0].shape[-2:]
         n_elems_inputs = torch.prod(torch.Tensor([shape_input]))
-        n_elems_inputs = n_elems_inputs.to(self.device)
-
-        #resize_trgt = {k: transforms.Compose(
-        #    [transforms.ToPILImage(),
-        #     transforms.Resize(v),
-        #     transforms.ToTensor()])
-        #                 for k,v in shape_inputs.items()}
+        n_elems_inputs = n_elems_inputs.to(self.device).float()
 
         loss_sides = torch.Tensor([0]).to(self.device)
         if(target_sides is not None):
@@ -339,14 +324,23 @@ class CobNetLoss(nn.Module):
                 # Apply transform to batch
                 #t_  = [resize_trgt[s](target_sides[s][b, ...])
                 #        for b in range(target_sides[s].shape[0])]
-                t_ = torch.cat([target_sides[s][b, ...]
-                                for b in range(target_sides[s].shape[0])])
+                t_ = torch.cat([
+                    target_sides[s][b, ...]
+                                for b in range(target_sides[s].shape[0])]).float()
 
                 # beta is for class imbalance
-                beta = torch.sum(t_).div(n_elems_inputs)
-                idx_pos = t_ > 0
-                loss_sides += -beta*torch.sum(y_sides[s][np.where(idx_pos)]) \
-                    -(1-beta)*torch.sum(y_sides[s][np.where(~idx_pos)])
+                beta = 1 - torch.sum(t_).div(n_elems_inputs)
+                #beta = alpha.pow(-1)
+                p_plus = utls.clamp_probs(y_sides[s])
+                p_neg = utls.clamp_probs(1 - y_sides[s])
+                idx_pos = t_ > 0.5
+                pos_term = -torch.sum(
+                    torch.log(p_plus[np.where(idx_pos)]))
+
+                neg_term = -torch.sum(
+                    torch.log(p_neg[np.where(~idx_pos)]))
+
+                loss_sides += beta*pos_term + (1-beta)*neg_term
 
         # Compute loss for fused edge map
         loss_fuse = torch.Tensor([0]).to(self.device)
@@ -361,11 +355,17 @@ class CobNetLoss(nn.Module):
             #t_  = [resize_transf(target_fused[b, ...])
             #        for b in range(target_fused.shape[0])]
             t_  = torch.cat([target_fused[b, ...]
-                    for b in range(target_fused.shape[0])])
-            beta = torch.sum(t_).div(n_elems_inputs)
-            idx_pos = t_ > 0
-            loss_fuse = -beta*torch.sum(y_fused[np.where(idx_pos)]) \
-                -(1-beta)*torch.sum(y_fused[np.where(~idx_pos)])
+                    for b in range(target_fused.shape[0])]).float()
+            beta = 1 - torch.sum(t_).div(n_elems_inputs)
+            #beta = alpha.pow(-1)
+            p_plus = utls.clamp_probs(y_fused)
+            p_neg = utls.clamp_probs(1 - y_fused)
+            idx_pos = t_ > 0.5
+            pos_term = -torch.sum(
+                torch.log(p_plus[np.where(idx_pos)]))
+            neg_term = -torch.sum(
+                torch.log(p_neg[np.where(~idx_pos)]))
+            loss_fuse =  beta*pos_term + (1-beta)*neg_term
 
         #y_orient = dict() # This stores one output per orientation module
         #for orient in self.orientation_keys:

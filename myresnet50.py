@@ -45,6 +45,22 @@ class MyResnet50(nn.Module):
         #for param in self.model.parameters():
         #    param.requires_grad = False
 
+    def get_params(self):
+
+        params = list()
+        params.append({'params': self.model.conv1.parameters()})
+        for m in [self.model.layer1,
+                  self.model.layer2,
+                  self.model.layer3,
+                  self.model.layer4]:
+            for l in m:
+                if(isinstance(l, nn.Conv2d)):
+                    params.append({'params': [l.weight]})
+                    params.append({'params': [l.bias]})
+
+        return params
+
+
     def state_dict(self):
         return self.model.state_dict()
 

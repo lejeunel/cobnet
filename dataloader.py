@@ -3,6 +3,7 @@ from torch.utils.data import Dataset, DataLoader
 import utils as utls
 import numpy
 from PIL import Image
+import matplotlib.pyplot as plt
 from torch.autograd import Variable
 import torch
 import numpy as np
@@ -31,6 +32,14 @@ class CobDataLoader(Dataset):
             transforms.Normalize(mean=mean_norm_base,
                                  std=std_norm_base)])
 
+        mean_inv_normalize = -np.asarray(mean_norm_base)/np.asarray(std_norm_base)
+        std_inv_normalize = 1./np.asarray(std_norm_base)
+        self.im_inv_transform = transforms.Compose([
+            transforms.Normalize(mean=mean_inv_normalize,
+                                 std=std_inv_normalize),
+            transforms.ToPILImage(),
+            transforms.Resize(np.asarray(shape_of_base)//2)])
+
         self.truth_transform_fuse = transforms.Compose([
             transforms.Resize(np.asarray(shape_of_base)//2),
             transforms.ToTensor()])
@@ -47,6 +56,11 @@ class CobDataLoader(Dataset):
     def __getitem__(self, idx):
         img_path = self.img_paths[idx]
 
+        # When truths are resized, the values change
+        # we apply a threshold to get back to binary
+
+        thr = torch.Tensor([0.]).to(self.device)
+
         img = utls.load_image(img_path, self.im_transform).to(self.device)
         img.requires_grad = True
 
@@ -58,9 +72,9 @@ class CobDataLoader(Dataset):
             gt = gts[np.random.choice(len(gts))]
             gt = Image.fromarray(np.uint8(gt*255))
 
-            gts_sides = [trf(gt).to(self.device)
+            gts_sides = [trf(gt).to(self.device) > thr
                          for trf in self.truth_transforms_sides]
 
-            gt_fuse = self.truth_transform_fuse(gt).to(self.device)
+            gt_fuse = self.truth_transform_fuse(gt).to(self.device) > thr
 
         return img, gts_sides, gt_fuse

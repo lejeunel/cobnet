@@ -61,7 +61,6 @@ class CobNetFuseModule(nn.Module):
                         torch.load(
                             os.path.join(path,'side_{}.pth'.format(i))))
 
-
         self.fusion_model.load_state_dict(
             torch.load(
                 os.path.join(path,'fusion.pth')))

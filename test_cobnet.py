@@ -23,16 +23,20 @@ truth_paths = sorted(glob.glob(os.path.join(root_dir, 'groundTruth','*', '*.mat'
 
 #test = utls.load_boundaries_bsds(truth_paths[0])
 
-cuda=False
+cuda = False
 
 train_val_ratio = .9
 n_train_smpls = int(len(image_paths)*train_val_ratio)
 train_idx = (0, n_train_smpls)
 val_idx = (n_train_smpls+1, len(image_paths))
 
+#images_train = image_paths[train_idx[0]:train_idx[1]//15]
+#truths_train = truth_paths[train_idx[0]:train_idx[1]//15]
+#images_val = image_paths[val_idx[0]:val_idx[1]//15]
+#truths_val = truth_paths[val_idx[0]:val_idx[1]//15]
+
 images_train = image_paths[train_idx[0]:train_idx[1]]
 truths_train = truth_paths[train_idx[0]:train_idx[1]]
-
 images_val = image_paths[val_idx[0]:val_idx[1]]
 truths_val = truth_paths[val_idx[0]:val_idx[1]]
 
@@ -42,8 +46,8 @@ mycobnet = CobNet(img_paths_train=images_train,
                   truth_paths_val=truths_val,
                   cuda=cuda)
 
-dict_ = mycobnet.state_dict()
-mycobnet.load_state_dict(dict_)
-#mycobnet.train()
+#dict_ = mycobnet.state_dict()
+#mycobnet.load_state_dict(dict_)
+mycobnet.train()
 
 #io.imsave('test.png', pred_)
