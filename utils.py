@@ -102,7 +102,7 @@ def save_tensors(im, pred, trgt, path):
     if(not os.path.exists(path_)):
         os.makedirs(path_)
 
-    im = (im*255).astype('uint8')
+    #im = (im*255).astype('uint8')
 
     pred_ = pred.detach().cpu().numpy().transpose((1,2,0))
     pred_ = (np.repeat(pred_, 3, axis=-1)*255).astype('uint8')

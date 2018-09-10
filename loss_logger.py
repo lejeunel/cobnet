@@ -45,7 +45,11 @@ class LossLogger:
                 self.print_loss_batch(epoch, batch, loss)
 
     def get_loss(self, epoch):
-        return np.sum(np.asarray(self.loss[epoch][:-1]))
+
+        if(epoch in self.loss.keys()):
+            return np.sum(np.asarray(self.loss[epoch][:-1]))
+        else:
+            return None
 
     def print_epoch(self, epoch):
 

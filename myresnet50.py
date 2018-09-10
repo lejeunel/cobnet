@@ -54,9 +54,9 @@ class MyResnet50(nn.Module):
                   self.model.layer3,
                   self.model.layer4]:
             for l in m:
-                if(isinstance(l, nn.Conv2d)):
-                    params.append({'params': [l.weight]})
-                    params.append({'params': [l.bias]})
+                params.append({'params': l.conv1.parameters()})
+                params.append({'params': l.conv2.parameters()})
+                params.append({'params': l.conv3.parameters()})
 
         return params
 

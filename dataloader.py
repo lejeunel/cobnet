@@ -7,6 +7,8 @@ import matplotlib.pyplot as plt
 from torch.autograd import Variable
 import torch
 import numpy as np
+from skimage.morphology import disk
+from skimage.morphology import binary_dilation
 
 class CobDataLoader(Dataset):
 
@@ -48,6 +50,9 @@ class CobDataLoader(Dataset):
             transforms.Resize((w, h)),
             transforms.ToTensor()]) for w,h in self.shapes_of_sides]
 
+        # We dilate segmentations
+        self.selem = disk(3)
+
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     def __len__(self):
@@ -67,10 +72,13 @@ class CobDataLoader(Dataset):
         if(self.truth_paths is not None):
             truth_path = self.truth_paths[idx]
             gts = utls.load_boundaries_bsds(truth_path)
+            gts = [binary_dilation(np.asarray(g), selem=self.selem)
+                   for g in gts]
+             
+            gt = (np.sum(gts,axis=0) > 3).astype(float)
+            #gt = np.uint8(gt*255)
 
-            # Pick segmentation of a random user...
-            gt = gts[np.random.choice(len(gts))]
-            gt = Image.fromarray(np.uint8(gt*255))
+            gt = Image.fromarray(gt.astype(float))
 
             gts_sides = [trf(gt).to(self.device) > thr
                          for trf in self.truth_transforms_sides]
