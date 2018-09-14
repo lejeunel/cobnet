@@ -116,3 +116,27 @@ def save_tensors(im, pred, trgt, path):
 def clamp_probs(probs):
     eps = _finfo(probs).eps
     return probs.clamp(min=eps, max=1 - eps)
+
+def set_optim_params_sgd(param_group_list,
+                     lr=None,
+                     momentum=None,
+                     dampening=None,
+                     weight_decay=None,
+                         nesterov=None):
+
+    param_list_new = list()
+
+    for p in param_group_list:
+        param_list_new.append(p)
+        if(lr is not None):
+            param_list_new[-1]['lr'] = lr
+        if(momentum is not None):
+            param_list_new[-1]['momentum'] = momentum
+        if(dampening is not None):
+            param_list_new[-1]['dampening'] = dampening
+        if(weight_decay is not None):
+            param_list_new[-1]['weight_decay'] = weight_decay
+
+    return param_list_new
+
+            

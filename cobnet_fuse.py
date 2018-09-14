@@ -39,16 +39,10 @@ class CobNetFuseModule(nn.Module):
         for m in self.side_models:
             for l in m:
                 if(isinstance(l, nn.Conv2d)):
-                    params.append({'params': [l.weight],
-                               'lr': 1e-2,
-                               'lr_decay': 1})
-                    params.append({'params': [l.bias],
-                               'lr': 2e-2,
-                               'lr_decay': 0})
+                    params.append({'params': [l.weight]})
+                    params.append({'params': [l.bias]})
 
-        params.append({'params': [self.fusion_model[0].weight],
-                   'lr': 1e-2,
-                   'lr_decay': 1})
+        params.append({'params': [self.fusion_model[0].weight]})
 
         return params
 

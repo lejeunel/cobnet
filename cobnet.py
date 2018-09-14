@@ -14,6 +14,7 @@ from cobnet_fuse import CobNetFuseModule
 import utils as utls
 from loss_logger import LossLogger
 
+
 # Model for Convolutional Oriented Boundaries
 # Needs a base model (vgg, resnet, ...) from which intermediate
 # features are extracted
@@ -30,9 +31,12 @@ class CobNet(nn.Module):
             batch_size=1,
             shuffle=True,
             num_workers=0,
-            num_epochs=20,
-            lr=0.01,
+            num_epochs=100,
+            lr=1 * 10e-5,
+            weight_decay=2 * 10e-4,
             momentum=0.9,
+            lr_switch=1 * 10e-6,  # This lr kicks in after epoch_switch
+            num_epochs_switch=90,
             cuda=False,
             save_path='checkpoints'):
 
@@ -49,6 +53,13 @@ class CobNet(nn.Module):
         self.save_path = save_path
 
         self.lr = lr
+        self.weight_decay = weight_decay
+        self.num_epochs = num_epochs
+        self.num_works = num_workers
+        self.lr = lr
+        self.momentum = momentum
+        self.lr_switch=lr_switch
+        self.num_epochs_switch = num_epochs_switch
 
         # We add a "weight-fusion" layer that sum outputs
         # of all side outputs to produce a global edge map
@@ -106,10 +117,6 @@ class CobNet(nn.Module):
                                    else "cpu")
 
         self.criterion = CobNetLoss(cuda=cuda)
-        self.num_epochs = num_epochs
-        self.num_works = num_workers
-        self.lr = lr
-        self.momentum = momentum
 
     def get_all_modules_as_dict(self):
 
@@ -208,7 +215,10 @@ class CobNet(nn.Module):
 
         # Observe that all parameters are being optimized
         optimizer = optim.SGD(
-            self.get_params(), momentum=self.momentum, lr=self.lr)
+            self.get_params(),
+            momentum=self.momentum,
+            lr=self.lr,
+            weight_decay=self.weight_decay)
 
         train_logger = LossLogger('train', self.batch_size,
                                   len(self.dataloaders['train']),
@@ -222,6 +232,13 @@ class CobNet(nn.Module):
         for epoch in range(self.num_epochs):
             print('Epoch {}/{}'.format(epoch, self.num_epochs - 1))
             print('-' * 10)
+
+            # lower learning rate...
+            if(epoch > self.num_epochs_switch):
+                new_params = utls.set_optim_params_sgd(
+                    optimizer.state_dict()['param_groups'],
+                    lr=self.lr_switch)
+                optimizer.state_dict()['param_groups'] = new_params
 
             # Each epoch has a training and validation phase
             for phase in ['train', 'val']:

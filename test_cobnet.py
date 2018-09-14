@@ -29,7 +29,7 @@ truth_paths = sorted(glob.glob(os.path.join(root_dir,
 
 #test = utls.load_boundaries_bsds(truth_paths[0])
 
-cuda = True
+cuda = False
 
 train_val_ratio = .9
 n_train_smpls = int(len(image_paths)*train_val_ratio)
