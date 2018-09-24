@@ -13,6 +13,7 @@ from cobnet_orientation import CobNetOrientationModule
 from cobnet_fuse import CobNetFuseModule
 import utils as utls
 from loss_logger import LossLogger
+from torchvision import transforms as trfms
 
 
 # Model for Convolutional Oriented Boundaries
@@ -282,11 +283,10 @@ class CobNet(nn.Module):
                 if phase == 'train':
                     path = os.path.join(self.save_path, 'previews',
                                         'epoch_{}.jpg'.format(epoch))
-                    import pdb; pdb.set_trace()
                     _, pred = self.forward(inputs)
                     im_ = inputs[0, ...].detach().cpu()
-                    im_ = self.dataloader_train.im_inv_transform(im_)
-                    im_ = np.asarray(im_)
+                    im_ = self.dataloader_train.trfm_inv_normalize(im_)
+                    im_ = (im_*255).astype('uint8')
                     utls.save_tensors(im_, pred, labels_fuse[0, ...], path)
 
                 # deep copy the model

@@ -35,19 +35,14 @@ class CobDataLoader(Dataset):
 
         self.shape_of_base = shape_of_base
 
-        self.trfm_normalize = trfms.Compose([
-            trfms.Resize(shape_of_base),
-            trfms.ToTensor(),
-            trfms.Normalize(mean=mean_norm_base,
-                                 std=std_norm_base)])
-
         mean_inv_normalize = -np.asarray(mean_norm_base)/np.asarray(std_norm_base)
         std_inv_normalize = 1./np.asarray(std_norm_base)
 
-        self.trfm_in_normalize = im_utls.EnhancedCompose([
-            im_utls.FloatScaleNumpy(),
+        self.trfm_inv_normalize = im_utls.EnhancedCompose([
+            im_utls.ToNumpyArray(),
             im_utls.Normalize(mean=mean_inv_normalize,
-                              std=std_inv_normalize)])
+                              std=std_inv_normalize),
+            im_utls.Resize(np.asarray(shape_of_base)//2)])
 
         self.trfm_half_in_shape = trfms.Compose([
             trfms.ToPILImage(),
@@ -95,8 +90,7 @@ class CobDataLoader(Dataset):
         thr = torch.Tensor([0.])
 
         img = np.asarray(utls.load_image(img_path, self.trfm_in_shape))
-        img = (img*255).astype(np.uint8).transpose((1,2,0))
-        #img.requires_grad = True
+        img = (img*255).astype(np.uint8).transpose((1, 2, 0))
 
         if(self.truth_paths is not None): # we're in train mode
             truth_path = self.truth_paths[idx]
@@ -107,9 +101,7 @@ class CobDataLoader(Dataset):
             gt = ((np.sum(gts,axis=0) > 3)*255).astype(np.uint8)[..., np.newaxis]
 
             # Apply data augmentation
-            im, gt = self.trfm_augment([img, gt])
-
-            img = self.trfm_in_normalize(img)
+            img, gt = self.trfm_augment([img, gt])
 
             gts_sides = [trf(gt) > thr
                          for trf in self.trfm_sides]
@@ -117,7 +109,7 @@ class CobDataLoader(Dataset):
             gt_fuse = (self.trfm_half_in_shape(gt) > thr).float()
 
         # Move to device
-        img = torch.Tensor(img.transpose((2,1,0))).to(self.device)
+        img = img.to(self.device)
         gt_fuse = torch.Tensor(gt_fuse).to(self.device)
         gts_sides = [g.to(self.device) for g in gts_sides]
 

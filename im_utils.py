@@ -429,9 +429,10 @@ class RandomFlip(object):
         self.random_state = random_state
 
     def __call__(self, image):
-        do_it = self.random_state.uniform(0, 1)
-        if (isinstance(image, np.ndarray) and do_it):
-            image = np.flip(image, axis=self.axis)
+        do_it = np.random.choice([True, False])
+        if (isinstance(image, np.ndarray)):
+            if(do_it):
+                image = np.flip(image, axis=self.axis)
         else:
             raise Exception('unsupported type')
         return image
