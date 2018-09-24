@@ -282,6 +282,7 @@ class CobNet(nn.Module):
                 if phase == 'train':
                     path = os.path.join(self.save_path, 'previews',
                                         'epoch_{}.jpg'.format(epoch))
+                    import pdb; pdb.set_trace()
                     _, pred = self.forward(inputs)
                     im_ = inputs[0, ...].detach().cpu()
                     im_ = self.dataloader_train.im_inv_transform(im_)

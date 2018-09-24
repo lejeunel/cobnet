@@ -111,15 +111,14 @@ class CobDataLoader(Dataset):
 
             img = self.trfm_in_normalize(img)
 
-            import pdb; pdb.set_trace()
             gts_sides = [trf(gt) > thr
                          for trf in self.trfm_sides]
 
-            gt_fuse = self.trfm_half_in_shape(gt) > thr
+            gt_fuse = (self.trfm_half_in_shape(gt) > thr).float()
 
         # Move to device
-        img = img.to(self.device)
-        gt_fuse = gt_fuse.to(self.device)
+        img = torch.Tensor(img.transpose((2,1,0))).to(self.device)
+        gt_fuse = torch.Tensor(gt_fuse).to(self.device)
         gts_sides = [g.to(self.device) for g in gts_sides]
 
         return img, gts_sides, gt_fuse
