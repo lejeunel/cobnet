@@ -22,6 +22,6 @@ class CobNetFuseModule(nn.Module):
 
     def forward(self, sides):
         y_fine = self.fine(torch.cat(sides[:4], dim=1))
-        y_coarse = self.fine(torch.cat(sides[1:], dim=1))
+        y_coarse = self.coarse(torch.cat(sides[1:], dim=1))
 
         return y_fine, y_coarse

@@ -199,24 +199,21 @@ def train(cfg, model, device, dataloaders, run_path, writer):
                                  device, mode, writer, epoch)
 
         # save checkpoint
-        if (epoch % cfg.cp_period == 0):
-            path = pjoin(run_path, 'checkpoints', 'cp_{}.pth.tar'.format(mode))
-            utls.save_checkpoint({'epoch': epoch + 1, 'model': model}, path)
+        path = pjoin(run_path, 'checkpoints', 'cp_{}.pth.tar'.format(mode))
+        utls.save_checkpoint({'epoch': epoch + 1, 'model': model}, path)
 
         # save previews
-        if (epoch % cfg.cp_period == 0) and (epoch > 0):
-            out_path = pjoin(cfg.run_path, 'previews')
-            if not os.path.exists(out_path):
-                os.makedirs(out_path)
-            print('generating previews to {}'.format(out_path))
+        out_path = pjoin(cfg.run_path, 'previews')
+        if not os.path.exists(out_path):
+            os.makedirs(out_path)
+        print('generating previews to {}'.format(out_path))
 
-            batch = utls.batch_to_device(next(iter(dataloaders['prev'])),
-                                         device)
-            model.eval()
-            with torch.no_grad():
-                res = model(batch['image'])
-            utls.save_preview(batch, res,
-                              pjoin(out_path, 'ep_{:04d}.png'.format(epoch)))
+        batch = utls.batch_to_device(next(iter(dataloaders['prev'])), device)
+        model.eval()
+        with torch.no_grad():
+            res = model(batch['image'])
+        utls.save_preview(batch, res,
+                          pjoin(out_path, 'ep_{:04d}.png'.format(epoch)))
 
         # write losses to tensorboard
         model.eval()
