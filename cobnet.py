@@ -8,6 +8,7 @@ import utils as utls
 from torchvision import transforms as trfms
 import torchvision.models as models
 from torchvision.models.resnet import Bottleneck
+import math
 
 
 def remove_bn(network):
@@ -47,14 +48,18 @@ class CobNet(nn.Module):
                       kernel_size=1),
         ])
 
+        # set initial bias to something low
+        bias = -math.log((1 - 0.1) / 0.1)
+        for m in self.reducers:
+            m.bias.data.fill_(bias)
+
         self.fuse = CobNetFuseModule()
 
         self.n_orientations = n_orientations
         self.orientations = nn.ModuleList(
             [CobNetOrientationModule() for _ in range(n_orientations)])
 
-    def forward(self, im):
-
+    def forward_sides(self, im):
         in_shape = im.shape[2:]
         # pass through base_model and store intermediate activations (sides)
         sides = []
@@ -78,16 +83,35 @@ class CobNet(nn.Module):
             reduced_sides.append(upsamp(m(s)))
         cat_sides = torch.cat(reduced_sides, dim=1)
 
-        y_fine, y_coarse = self.fuse(cat_sides)
+        return cat_sides
 
+    def forward_orient(self, sides):
+        shape = sides.shape[2:]
+        upsamp = nn.UpsamplingBilinear2d(shape)
         orientations = []
         for m in self.orientations:
             or_ = upsamp(m(sides))
             orientations.append(or_)
 
+        return orientations
+
+    def forward_fuse(self, sides):
+
+        shape = sides.shape[2:]
+        upsamp = nn.UpsamplingBilinear2d(shape)
+        y_fine, y_coarse = self.fuse(sides)
+
+        return y_fine, y_coarse
+
+    def forward(self, im):
+        sides = self.forward_sides(self, im)
+
+        orientations = self.forward_orient(sides)
+        y_fine, y_coarse = self.forward_fuse(sides)
+
         return {
+            'sides': sides,
+            'orientations': orientations,
             'y_fine': y_fine,
-            'y_coarse': y_coarse,
-            'sides': reduced_sides,
-            'orientations': orientations
+            'y_coarse': y_coarse
         }

@@ -24,10 +24,9 @@ def save_checkpoint(dict_, path):
 
 
 def save_preview(data, res, path, n_orient=4):
-    bsize = data['image'].shape[0]
     ims = make_grid(data['image'], scale_each=True, nrow=1)
-    fine = make_grid(res['y_fine'].sigmoid(), scale_each=True, nrow=1)
-    coarse = make_grid(res['y_fine'].sigmoid(), scale_each=True, nrow=1)
+    fine = make_grid(res['y_fine'].sigmoid(), nrow=1)
+    coarse = make_grid(res['y_coarse'].sigmoid(), nrow=1)
 
     total_orients = len(res['orientations'])
     orients_idx = np.arange(0, total_orients, step=total_orients // n_orient)

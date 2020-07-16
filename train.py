@@ -50,31 +50,31 @@ def val(model, dataloader, device, mode, writer, epoch):
 
             res = model(data['image'])
 
-            loss = 0
+            loss_sides = 0
+            loss_orient = 0
 
             if (mode == 'fs'):
                 for s in res['sides']:
-                    loss += criterion(s.sigmoid(), data['cntr'])
+                    loss_sides += criterion(s.sigmoid(), data['cntr'])
 
                 loss_fine = criterion(res['y_fine'].sigmoid(), data['cntr'])
                 loss_coarse = criterion(res['y_coarse'].sigmoid(),
                                         data['cntr'])
-                running_loss = loss.cpu().detach().numpy()
+                running_loss += loss_sides.cpu().detach().numpy()
                 running_loss += loss_coarse.cpu().detach().numpy()
                 running_loss += loss_fine.cpu().detach().numpy()
 
             else:
-                loss = torch.tensor([
-                    criterion(res['orientations'][i],
-                              (data['or_cntr'] == i + 1).float())
-                    for i in range(1, model.n_orientations)
-                ]).sum()
-                running_loss = loss.cpu().detach().numpy()
+                for i, o_ in enumerate(res['orientations']):
+                    loss_orient += criterion(res['orientations'][i],
+                                             (data['or_cntr'] == i +
+                                              1).float())
+                running_loss += loss_orient.cpu().detach().numpy()
 
         loss_ = running_loss / ((i + 1) * cfg.batch_size)
         niter = epoch * len(dataloader) + i
         writer.add_scalar('val/loss_{}'.format(mode), loss_, niter)
-        pbar.set_description('lss {:.6e}'.format(loss_))
+        pbar.set_description('[val] lss {:.6e}'.format(loss_))
         pbar.update(1)
 
     pbar.close()
@@ -98,44 +98,44 @@ def train_one_epoch(model, dataloader, optimizers, device, mode, writer,
             for k in optimizers.keys():
                 optimizers[k].zero_grad()
 
-            res = model(data['image'])
-
-            loss = 0
+            loss_sides = 0
+            loss_orient = 0
 
             if (mode == 'fs'):
-                for s in res['sides']:
-                    loss += criterion(s.sigmoid(), data['cntr'])
-                loss.backward(retain_graph=True)
+                sides = model.forward_sides(data['image'])
 
-                with torch.autograd.set_detect_anomaly(True):
-                    loss_fine = criterion(res['y_fine'].sigmoid(),
-                                          data['cntr'])
-                    loss_fine.backward(retain_graph=True)
-                    loss_coarse = criterion(res['y_coarse'].sigmoid(),
-                                            data['cntr'])
-                    loss_coarse.backward(retain_graph=True)
+                # regress all side-activations
+                for s in range(sides.shape[1]):
+                    loss_sides += criterion(
+                        sides[:, s, ...].unsqueeze(1).sigmoid(), data['cntr'])
+                loss_sides.backward()
+                optimizers['base'].step()
+                optimizers['reduc'].step()
 
-                optimizers['base_reduc'].step()
-                optimizers['reduc_fuse'].step()
+                y_fine, y_coarse = model.forward_fuse(sides.detach())
+                loss_fine = criterion(y_fine.sigmoid(), data['cntr'])
+                loss_coarse = criterion(y_coarse.sigmoid(), data['cntr'])
+                (loss_fine + loss_coarse).backward()
+                optimizers['fuse'].step()
 
-                running_loss += loss.cpu().detach().numpy()
+                running_loss += loss_sides.cpu().detach().numpy()
                 running_loss += loss_coarse.cpu().detach().numpy()
                 running_loss += loss_fine.cpu().detach().numpy()
 
             else:
-                loss = torch.tensor([
-                    criterion(res['orientations'][i],
-                              (data['or_cntr'] == i + 1).float())
-                    for i in range(1, model.n_orientations)
-                ]).sum()
-                loss.backward()
+                res = model(data['image'])
+                for i, o_ in enumerate(res['orientations']):
+                    loss_orient += criterion(res['orientations'][i],
+                                             (data['or_cntr'] == i +
+                                              1).float())
+                loss_orient.backward()
                 optimizers['orientation'].step()
-                running_loss += loss.cpu().detach().numpy()
+                running_loss += loss_orient.cpu().detach().numpy()
 
         loss_ = running_loss / ((i + 1) * cfg.batch_size)
         niter = epoch * len(dataloader) + i
         writer.add_scalar('train/loss_{}'.format(mode), loss_, niter)
-        pbar.set_description('lss {:.6e}'.format(loss_))
+        pbar.set_description('[train] lss {:.6e}'.format(loss_))
         pbar.update(1)
 
     pbar.close()
@@ -150,15 +150,18 @@ def train_one_epoch(model, dataloader, optimizers, device, mode, writer,
 def train(cfg, model, device, dataloaders, run_path, writer):
 
     optimizers = {
-        'base_reduc':
-        optim.SGD(list(model.base_model.parameters()) +
-                  list(model.reducers.parameters()),
+        'base':
+        optim.SGD(model.base_model.parameters(),
                   lr=cfg.lr,
                   weight_decay=cfg.decay,
                   momentum=cfg.momentum),
-        'reduc_fuse':
-        optim.SGD(list(model.reducers.parameters()) +
-                  list(model.fuse.parameters()),
+        'reduc':
+        optim.SGD(model.reducers.parameters(),
+                  lr=cfg.lr,
+                  weight_decay=cfg.decay,
+                  momentum=cfg.momentum),
+        'fuse':
+        optim.SGD(model.fuse.parameters(),
                   lr=cfg.lr,
                   weight_decay=cfg.decay,
                   momentum=cfg.momentum),
@@ -169,20 +172,23 @@ def train(cfg, model, device, dataloaders, run_path, writer):
                   momentum=cfg.momentum),
     }
     lr_sch = {
-        'base_reduc':
-        torch.optim.lr_scheduler.MultiStepLR(optimizers['base_reduc'],
-                                             milestones=[cfg.epochs_pre]),
-        'reduc_fuse':
-        torch.optim.lr_scheduler.MultiStepLR(optimizers['reduc_fuse'],
-                                             milestones=[cfg.epochs_pre]),
+        'base':
+        optim.lr_scheduler.MultiStepLR(optimizers['base'],
+                                       milestones=[cfg.epochs_pre]),
+        'reduc':
+        optim.lr_scheduler.MultiStepLR(optimizers['reduc'],
+                                       milestones=[cfg.epochs_pre]),
+        'fuse':
+        optim.lr_scheduler.MultiStepLR(optimizers['fuse'],
+                                       milestones=[cfg.epochs_pre]),
         'orientation':
-        torch.optim.lr_scheduler.MultiStepLR(optimizers['orientation'],
-                                             milestones=[cfg.epochs_pre])
+        optim.lr_scheduler.MultiStepLR(optimizers['orientation'],
+                                       milestones=[cfg.epochs_pre])
     }
 
     mode = 'fs'
     for epoch in range(cfg.epochs):
-        if (epoch > cfg.epochs_pre):
+        if (epoch > cfg.epochs_pre - 1):
             mode = 'or'
         # save checkpoint
         if (epoch % cfg.cp_period == 0):
@@ -203,12 +209,12 @@ def train(cfg, model, device, dataloaders, run_path, writer):
             utls.save_preview(batch, res,
                               pjoin(out_path, 'ep_{:04d}.png'.format(epoch)))
 
-        print('epoch {}/{}. Mode: {}'.format(epoch, cfg.epochs, mode))
+        print('epoch {}/{}. Mode: {}'.format(epoch + 1, cfg.epochs, mode))
         model.train()
         losses = train_one_epoch(model, dataloaders['train'], optimizers,
                                  device, mode, writer, epoch)
         # write losses to tensorboard
-        losses = val(model, dataloaders['train'], device, mode, writer, epoch)
+        val(model, dataloaders['train'], device, mode, writer, epoch)
 
         for k in lr_sch.keys():
             lr_sch[k].step()
@@ -237,7 +243,6 @@ def main(cfg):
 
     dset_val = CobDataLoader(root_imgs=cfg.root_imgs,
                              root_segs=cfg.root_segs,
-                             augmentations=transf,
                              split='val')
 
     dl_val = DataLoader(dset_val, collate_fn=dset_val.collate_fn)
