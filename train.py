@@ -54,7 +54,7 @@ def val(model, dataloader, device, mode, writer, epoch):
             loss_orient = 0
 
             if (mode == 'fs'):
-                for s in res['sides']:
+                for s in res['late_sides']:
                     loss_sides += criterion(s.sigmoid(), data['cntr'])
 
                 loss_fine = criterion(res['y_fine'].sigmoid(), data['cntr'])
@@ -102,17 +102,19 @@ def train_one_epoch(model, dataloader, optimizers, device, mode, writer,
             loss_orient = 0
 
             if (mode == 'fs'):
-                sides = model.forward_sides(data['image'])
+                _, sides = model.forward_sides(data['image'])
 
                 # regress all side-activations
-                for s in range(sides.shape[1]):
-                    loss_sides += criterion(
-                        sides[:, s, ...].unsqueeze(1).sigmoid(), data['cntr'])
+                for s in sides:
+                    loss_sides += criterion(s.sigmoid(), data['cntr'])
                 loss_sides.backward()
                 optimizers['base'].step()
                 optimizers['reduc'].step()
 
-                y_fine, y_coarse = model.forward_fuse(sides.detach())
+                # detach all activations so gradient doesn't pass
+                sides = [s.detach() for s in sides]
+
+                y_fine, y_coarse = model.forward_fuse(sides)
                 loss_fine = criterion(y_fine.sigmoid(), data['cntr'])
                 loss_coarse = criterion(y_coarse.sigmoid(), data['cntr'])
                 (loss_fine + loss_coarse).backward()
@@ -190,10 +192,17 @@ def train(cfg, model, device, dataloaders, run_path, writer):
     for epoch in range(cfg.epochs):
         if (epoch > cfg.epochs_pre - 1):
             mode = 'or'
+
+        print('epoch {}/{}. Mode: {}'.format(epoch + 1, cfg.epochs, mode))
+        model.train()
+        losses = train_one_epoch(model, dataloaders['train'], optimizers,
+                                 device, mode, writer, epoch)
+
         # save checkpoint
         if (epoch % cfg.cp_period == 0):
             path = pjoin(run_path, 'checkpoints', 'cp_{}.pth.tar'.format(mode))
             utls.save_checkpoint({'epoch': epoch + 1, 'model': model}, path)
+
         # save previews
         if (epoch % cfg.cp_period == 0) and (epoch > 0):
             out_path = pjoin(cfg.run_path, 'previews')
@@ -209,11 +218,8 @@ def train(cfg, model, device, dataloaders, run_path, writer):
             utls.save_preview(batch, res,
                               pjoin(out_path, 'ep_{:04d}.png'.format(epoch)))
 
-        print('epoch {}/{}. Mode: {}'.format(epoch + 1, cfg.epochs, mode))
-        model.train()
-        losses = train_one_epoch(model, dataloaders['train'], optimizers,
-                                 device, mode, writer, epoch)
         # write losses to tensorboard
+        model.eval()
         val(model, dataloaders['train'], device, mode, writer, epoch)
 
         for k in lr_sch.keys():

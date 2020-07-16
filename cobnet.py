@@ -21,11 +21,8 @@ def remove_bn(network):
     return network
 
 
-# Model for Convolutional Oriented Boundaries
-# Needs a base model (vgg, resnet, ...) from which intermediate
-# features are extracted
 class CobNet(nn.Module):
-    def __init__(self, n_orientations=8):
+    def __init__(self, n_orientations=8, init_bias=0.1):
 
         super(CobNet, self).__init__()
         self.base_model = models.resnet50(pretrained=True)
@@ -49,7 +46,7 @@ class CobNet(nn.Module):
         ])
 
         # set initial bias to something low
-        bias = -math.log((1 - 0.1) / 0.1)
+        bias = -math.log((1 - init_bias) / init_bias)
         for m in self.reducers:
             m.bias.data.fill_(bias)
 
@@ -62,33 +59,33 @@ class CobNet(nn.Module):
     def forward_sides(self, im):
         in_shape = im.shape[2:]
         # pass through base_model and store intermediate activations (sides)
-        sides = []
+        pre_sides = []
         x = self.base_model.conv1(im)
         x = self.base_model.bn1(x)
         x = self.base_model.relu(x)
-        sides.append(x)
+        pre_sides.append(x)
         x = self.base_model.maxpool(x)
         x = self.base_model.layer1(x)
-        sides.append(x)
+        pre_sides.append(x)
         x = self.base_model.layer2(x)
-        sides.append(x)
+        pre_sides.append(x)
         x = self.base_model.layer3(x)
-        sides.append(x)
+        pre_sides.append(x)
         x = self.base_model.layer4(x)
-        sides.append(x)
+        pre_sides.append(x)
 
-        reduced_sides = []
+        late_sides = []
         upsamp = nn.UpsamplingBilinear2d(in_shape)
-        for s, m in zip(sides, self.reducers):
-            reduced_sides.append(upsamp(m(s)))
-        cat_sides = torch.cat(reduced_sides, dim=1)
+        for s, m in zip(pre_sides, self.reducers):
+            late_sides.append(upsamp(m(s)))
 
-        return cat_sides
+        return pre_sides, late_sides
 
-    def forward_orient(self, sides):
-        shape = sides.shape[2:]
-        upsamp = nn.UpsamplingBilinear2d(shape)
+    def forward_orient(self, sides, shape=512):
+
+        upsamp = nn.UpsamplingBilinear2d((shape, shape))
         orientations = []
+
         for m in self.orientations:
             or_ = upsamp(m(sides))
             orientations.append(or_)
@@ -97,20 +94,19 @@ class CobNet(nn.Module):
 
     def forward_fuse(self, sides):
 
-        shape = sides.shape[2:]
-        upsamp = nn.UpsamplingBilinear2d(shape)
         y_fine, y_coarse = self.fuse(sides)
 
         return y_fine, y_coarse
 
     def forward(self, im):
-        sides = self.forward_sides(self, im)
+        pre_sides, late_sides = self.forward_sides(im)
 
-        orientations = self.forward_orient(sides)
-        y_fine, y_coarse = self.forward_fuse(sides)
+        orientations = self.forward_orient(pre_sides)
+        y_fine, y_coarse = self.forward_fuse(late_sides)
 
         return {
-            'sides': sides,
+            'pre_sides': pre_sides,
+            'late_sides': late_sides,
             'orientations': orientations,
             'y_fine': y_fine,
             'y_coarse': y_coarse

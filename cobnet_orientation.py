@@ -16,10 +16,6 @@ class CobNetOrientationModule(nn.Module):
             module.append(nn.Conv2d(inc, 32, kernel_size=3, padding=1))
             module.append(nn.Conv2d(32, 4, kernel_size=3, padding=1))
 
-            if (i > 0):
-                module.append(
-                    nn.ConvTranspose2d(4, 4, kernel_size=4 * i, stride=2 * i))
-
             self.stages.append(nn.Sequential(*module))
 
         self.last_conv = nn.Conv2d(20, 1, kernel_size=3, padding=1)

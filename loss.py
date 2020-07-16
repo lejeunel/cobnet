@@ -16,6 +16,6 @@ class BalancedBCE(nn.Module):
         bce_pos = bce[target == 1].mean()
         bce_neg = bce[target == 0].mean()
 
-        loss = beta * bce_pos + (1 - beta) * bce_neg
+        loss = (1 - beta) * bce_pos + beta * bce_neg
 
         return loss
