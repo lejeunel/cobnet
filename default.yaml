@@ -1,0 +1,9 @@
+aug-n-angles: 4
+epochs: 10
+epochs-pre: 0
+cp-period: 1
+n-ims-test: 10
+batch-size: 2
+lr: 1e-6
+decay: 2e-4
+momentum: 0.9
