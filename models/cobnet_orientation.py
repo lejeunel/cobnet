@@ -13,12 +13,33 @@ class CobNetOrientationModule(nn.Module):
         self.stages = nn.ModuleList()
         for i, inc in enumerate(in_channels):
             module = []
-            module.append(nn.Conv2d(inc, 32, kernel_size=3, padding=1))
-            module.append(nn.Conv2d(32, 4, kernel_size=3, padding=1))
+            conv1 = nn.Conv2d(inc, 32, kernel_size=3, padding=1)
+            conv2 = nn.Conv2d(32, 4, kernel_size=3, padding=1)
+            nn.init.normal_(conv1.weight, std=0.01)
+            nn.init.normal_(conv2.weight, std=0.01)
+            module.append(conv1)
+            module.append(conv2)
 
             self.stages.append(nn.Sequential(*module))
 
         self.last_conv = nn.Conv2d(20, 1, kernel_size=3, padding=1)
+        nn.init.normal_(self.last_conv.weight, std=0.01)
+
+    def get_weight(self):
+        params = []
+        for s in self.stages:
+            for m in s:
+                params.append(m.weight)
+        params.append(self.last_conv.weight)
+        return params
+
+    def get_bias(self):
+        params = []
+        for s in self.stages:
+            for m in s:
+                params.append(m.bias)
+        params.append(self.last_conv.bias)
+        return params
 
     def forward(self, sides):
 

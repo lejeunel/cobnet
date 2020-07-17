@@ -3,7 +3,7 @@ epochs: 10
 epochs-pre: 8
 cp-period: 1
 n-ims-test: 10
-batch-size: 2
-lr: 1e-4
+batch-size: 1
+lr: 1e-6
 decay: 2e-4
 momentum: 0.9

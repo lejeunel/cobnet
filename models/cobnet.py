@@ -1,24 +1,14 @@
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
-from cobnet_orientation import CobNetOrientationModule
-from cobnet_fuse import CobNetFuseModule
+from models.cobnet_orientation import CobNetOrientationModule
+from models.cobnet_fuse import CobNetFuseModule
 from torch import nn
 import utils as utls
 from torchvision import transforms as trfms
 import torchvision.models as models
 from torchvision.models.resnet import Bottleneck
 import math
-
-
-def remove_bn(network):
-    for layer in network.children():
-        if isinstance(layer, nn.Sequential) or (isinstance(layer, Bottleneck)):
-            remove_bn(layer)
-        if list(layer.children()) == []:  # if leaf node, add it to list
-            if isinstance(layer, nn.BatchNorm2d):
-                layer = nn.Identity()
-    return network
 
 
 class CobNet(nn.Module):
@@ -45,16 +35,39 @@ class CobNet(nn.Module):
                       kernel_size=1),
         ])
 
-        # set initial bias to something low
-        bias = -math.log((1 - init_bias) / init_bias)
-        for m in self.reducers:
-            m.bias.data.fill_(bias)
-
         self.fuse = CobNetFuseModule()
 
         self.n_orientations = n_orientations
         self.orientations = nn.ModuleList(
             [CobNetOrientationModule() for _ in range(n_orientations)])
+
+    def get_orient_bias(self):
+        params = []
+        for m in self.orientations:
+            params.extend(m.get_bias())
+
+        return params
+
+    def get_orient_weight(self):
+        params = []
+        for m in self.orientations:
+            params.extend(m.get_weight())
+
+        return params
+
+    def get_reduc_bias(self):
+        params = []
+        for m in self.reducers:
+            params.append(m.bias)
+
+        return params
+
+    def get_reduc_weight(self):
+        params = []
+        for m in self.reducers:
+            params.append(m.weight)
+
+        return params
 
     def forward_sides(self, im):
         in_shape = im.shape[2:]

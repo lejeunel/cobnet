@@ -14,8 +14,8 @@ from sklearn.metrics import pairwise_distances_argmin_min
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
-from augmenters import Normalize, rescale_augmenter
-from pascal_ctxt import pascalVOCContextLoader
+from utils.augmenters import Normalize, rescale_augmenter
+from utils.pascal_ctxt import pascalVOCContextLoader
 
 
 def interpolate_to_polygon(arr, n_pts=10000, n_bins=8):

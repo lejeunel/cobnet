@@ -13,12 +13,12 @@ from tensorboardX import SummaryWriter
 from torch import sigmoid
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-import utils as utls
 
+from utils import utils as utls
 import params
-from cobnet import CobNet
-from dataloader import CobDataLoader
-from loss import BalancedBCE
+from models.cobnet import CobNet
+from utils.dataloader import CobDataLoader
+from utils.loss import BalancedBCE
 
 
 def make_data_aug(cfg):
@@ -54,6 +54,8 @@ def val(model, dataloader, device, mode, writer, epoch):
             loss_orient = 0
 
             if (mode == 'fs'):
+                import pdb
+                pdb.set_trace()  ## DEBUG ##
                 for s in res['late_sides']:
                     loss_sides += criterion(s.sigmoid(), data['cntr'])
 
@@ -151,24 +153,61 @@ def train_one_epoch(model, dataloader, optimizers, device, mode, writer,
 
 def train(cfg, model, device, dataloaders, run_path, writer):
 
+    model_params = utls.parse_model_params(model)
+
     optimizers = {
         'base':
-        optim.SGD(model.base_model.parameters(),
+        optim.SGD([{
+            'params': model_params['base.weight'],
+        }, {
+            'params': model_params['base.bias'],
+            'weight_decay': 0
+        }],
                   lr=cfg.lr,
                   weight_decay=cfg.decay,
                   momentum=cfg.momentum),
         'reduc':
-        optim.SGD(model.reducers.parameters(),
-                  lr=cfg.lr,
-                  weight_decay=cfg.decay,
-                  momentum=cfg.momentum),
+        optim.SGD(
+            [
+                {
+                    'params': model_params['reducers.weight'],
+                    'lr': cfg.lr * 0.01,
+                },
+                {
+                    'params': model_params['reducers.bias'],
+                    # 'lr': cfg.lr * 0.02,
+                    'lr': cfg.lr * 0.01,
+                    'weight_decay': 0,
+                }
+            ],
+            lr=cfg.lr,
+            weight_decay=cfg.decay,
+            momentum=cfg.momentum),
         'fuse':
-        optim.SGD(model.fuse.parameters(),
-                  lr=cfg.lr,
-                  weight_decay=cfg.decay,
-                  momentum=cfg.momentum),
+        optim.SGD(
+            [
+                {
+                    'params': model_params['fuse.weight'],
+                    'lr': cfg.lr * 0.01,
+                },
+                {
+                    'params': model_params['fuse.bias'],
+                    # 'lr': cfg.lr * 0.02,
+                    'lr': cfg.lr * 0.01,
+                    'weight_decay': 0,
+                }
+            ],
+            lr=cfg.lr,
+            weight_decay=cfg.decay,
+            momentum=cfg.momentum),
         'orientation':
-        optim.SGD(model.orientations.parameters(),
+        optim.SGD([{
+            'params': model_params['orientation.weight'],
+        }, {
+            'params': model_params['orientation.bias'],
+            'lr': cfg.lr * 2,
+            'weight_decay': 0,
+        }],
                   lr=cfg.lr,
                   weight_decay=cfg.decay,
                   momentum=cfg.momentum),
@@ -188,8 +227,16 @@ def train(cfg, model, device, dataloaders, run_path, writer):
                                        milestones=[cfg.epochs_pre])
     }
 
-    mode = 'fs'
-    for epoch in range(cfg.epochs):
+    fs_path = pjoin(run_path, 'checkpoints', 'cp_fs.pth.tar')
+    if (os.path.exists(fs_path)):
+        print('found model {}'.format(fs_path))
+        print('will skip fusion mode')
+        start_epoch = cfg.epochs_pre
+    else:
+        start_epoch = 0
+        mode = 'fs'
+
+    for epoch in range(start_epoch, cfg.epochs):
         if (epoch > cfg.epochs_pre - 1):
             mode = 'or'
 
@@ -214,13 +261,12 @@ def train(cfg, model, device, dataloaders, run_path, writer):
             res = model(batch['image'])
         utls.save_preview(batch, res,
                           pjoin(out_path, 'ep_{:04d}.png'.format(epoch)))
+        for k in lr_sch.keys():
+            lr_sch[k].step()
 
         # write losses to tensorboard
         model.eval()
         val(model, dataloaders['train'], device, mode, writer, epoch)
-
-        for k in lr_sch.keys():
-            lr_sch[k].step()
 
 
 def main(cfg):
