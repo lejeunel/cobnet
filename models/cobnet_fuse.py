@@ -11,16 +11,15 @@ class CobNetFuseModule(nn.Module):
     This performs a linear weighting of side activations
     to return a fine and coarse edge map
     """
-    def __init__(self, n_sides=4, init_prob=0.1):
+    def __init__(self, n_sides=4):
         super(CobNetFuseModule, self).__init__()
         self.fine = nn.Conv2d(n_sides, 1, kernel_size=1)
         self.coarse = nn.Conv2d(n_sides, 1, kernel_size=1)
 
-        # bias = -math.log((1 - init_prob) / init_prob)
-        # self.fine.bias.data.fill_(bias)
-        # self.coarse.bias.data.fill_(bias)
         nn.init.constant_(self.fine.weight, 0.25)
+        nn.init.constant_(self.fine.bias, 0.)
         nn.init.constant_(self.coarse.weight, 0.25)
+        nn.init.constant_(self.coarse.bias, 0.)
 
     def get_bias(self):
         return [self.fine.bias, self.coarse.bias]

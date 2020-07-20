@@ -9,13 +9,15 @@ class BalancedBCE(nn.Module):
         super(BalancedBCE, self).__init__()
 
     def forward(self, input, target):
-        beta = target.sum() / target.numel()
         bce = F.binary_cross_entropy_with_logits(input,
                                                  target,
                                                  reduction='none')
-        bce_pos = bce[target == 1].mean()
-        bce_neg = bce[target == 0].mean()
 
-        loss = (1 - beta) * bce_pos + beta * bce_neg
+        beta = target.sum() / target.numel()
+        if target.sum() > 0:
+            loss = ((1 - beta) * bce[target == 1]).mean()
+            loss += (beta * bce[target == 0]).mean()
+        else:
+            loss = bce.mean()
 
         return loss

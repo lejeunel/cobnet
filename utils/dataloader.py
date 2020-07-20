@@ -234,8 +234,6 @@ if __name__ == "__main__":
     dl = DataLoader(dl, collate_fn=dl.collate_fn)
 
     for d in dl:
-        import pdb
-        pdb.set_trace()  ## DEBUG ##
         or_cntr = d['or_cntr'].detach().cpu().numpy().squeeze()
         im = d['image'].detach().cpu().numpy().squeeze()
 

@@ -12,7 +12,7 @@ import math
 
 
 class CobNet(nn.Module):
-    def __init__(self, n_orientations=8, init_bias=0.1):
+    def __init__(self, n_orientations=8):
 
         super(CobNet, self).__init__()
         self.base_model = models.resnet50(pretrained=True)
@@ -35,39 +35,17 @@ class CobNet(nn.Module):
                       kernel_size=1),
         ])
 
+        for m in self.reducers:
+            nn.init.normal_(m.weight, 0.01)
+            nn.init.constant_(m.bias, 0.)
+            # nn.init.xavier_normal_(m.weight)
+            # nn.init.constant_(m.bias, 0.)
+
         self.fuse = CobNetFuseModule()
 
         self.n_orientations = n_orientations
         self.orientations = nn.ModuleList(
             [CobNetOrientationModule() for _ in range(n_orientations)])
-
-    def get_orient_bias(self):
-        params = []
-        for m in self.orientations:
-            params.extend(m.get_bias())
-
-        return params
-
-    def get_orient_weight(self):
-        params = []
-        for m in self.orientations:
-            params.extend(m.get_weight())
-
-        return params
-
-    def get_reduc_bias(self):
-        params = []
-        for m in self.reducers:
-            params.append(m.bias)
-
-        return params
-
-    def get_reduc_weight(self):
-        params = []
-        for m in self.reducers:
-            params.append(m.weight)
-
-        return params
 
     def forward_sides(self, im):
         in_shape = im.shape[2:]
@@ -76,8 +54,8 @@ class CobNet(nn.Module):
         x = self.base_model.conv1(im)
         x = self.base_model.bn1(x)
         x = self.base_model.relu(x)
-        pre_sides.append(x)
         x = self.base_model.maxpool(x)
+        pre_sides.append(x)
         x = self.base_model.layer1(x)
         pre_sides.append(x)
         x = self.base_model.layer2(x)

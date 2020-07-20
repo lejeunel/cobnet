@@ -20,6 +20,14 @@ from models.cobnet import CobNet
 from utils.dataloader import CobDataLoader
 from utils.loss import BalancedBCE
 
+import math
+
+
+def freeze_bn(m):
+    classname = m.__class__.__name__
+    if classname.find('BatchNorm') != -1:
+        m.eval()
+
 
 def make_data_aug(cfg):
     transf = iaa.Sequential([
@@ -54,8 +62,6 @@ def val(model, dataloader, device, mode, writer, epoch):
             loss_orient = 0
 
             if (mode == 'fs'):
-                import pdb
-                pdb.set_trace()  ## DEBUG ##
                 for s in res['late_sides']:
                     loss_sides += criterion(s.sigmoid(), data['cntr'])
 
@@ -82,10 +88,15 @@ def val(model, dataloader, device, mode, writer, epoch):
     pbar.close()
 
 
+def check_nan_inf(tnsr):
+    n_nan = torch.isnan(tnsr).sum()
+    n_inf = torch.isinf(tnsr).sum()
+
+    return n_nan + n_inf
+
+
 def train_one_epoch(model, dataloader, optimizers, device, mode, writer,
                     epoch):
-
-    model.train()
 
     running_loss = 0
 
@@ -94,33 +105,45 @@ def train_one_epoch(model, dataloader, optimizers, device, mode, writer,
     pbar = tqdm(total=len(dataloader))
     for i, data in enumerate(dataloader):
         data = utls.batch_to_device(data, device)
+        # print('image num. nan_inf: {}'.format(check_nan_inf(data['image'])))
+        # print('cntr num. nan_inf: {}'.format(check_nan_inf(data['cntr'])))
 
         # forward
         with torch.set_grad_enabled(True):
-            for k in optimizers.keys():
-                optimizers[k].zero_grad()
 
             loss_sides = 0
             loss_orient = 0
 
             if (mode == 'fs'):
+
                 _, sides = model.forward_sides(data['image'])
 
                 # regress all side-activations
                 for s in sides:
-                    loss_sides += criterion(s.sigmoid(), data['cntr'])
+                    loss_sides += criterion(s, data['cntr'])
+
                 loss_sides.backward()
+                # torch.nn.utils.clip_grad_norm_(model.parameters(), 1e-2)
+
+                # utls.print_grad_norms(model)
                 optimizers['base'].step()
                 optimizers['reduc'].step()
+                optimizers['base'].zero_grad()
+                optimizers['reduc'].zero_grad()
 
-                # detach all activations so gradient doesn't pass
+                # detach all activations so gradient doesn't flow in past base/reduc layers
                 sides = [s.detach() for s in sides]
 
                 y_fine, y_coarse = model.forward_fuse(sides)
-                loss_fine = criterion(y_fine.sigmoid(), data['cntr'])
-                loss_coarse = criterion(y_coarse.sigmoid(), data['cntr'])
+
+                loss_fine = criterion(y_fine, data['cntr'])
+                loss_coarse = criterion(y_coarse, data['cntr'])
                 (loss_fine + loss_coarse).backward()
+
+                # torch.nn.utils.clip_grad_norm_(model.parameters(), 1e-2)
+                # utls.print_grad_norms(model)
                 optimizers['fuse'].step()
+                optimizers['fuse'].zero_grad()
 
                 running_loss += loss_sides.cpu().detach().numpy()
                 running_loss += loss_coarse.cpu().detach().numpy()
@@ -157,49 +180,47 @@ def train(cfg, model, device, dataloaders, run_path, writer):
 
     optimizers = {
         'base':
-        optim.SGD([{
-            'params': model_params['base.weight'],
-        }, {
-            'params': model_params['base.bias'],
-            'weight_decay': 0
-        }],
+        optim.SGD([
+            {
+                'params': model_params['base0-3.weight']
+            },
+            {
+                'params': model_params['base0-3.bias'],
+                'weight_decay': 0
+            },
+            {
+                'params': model_params['base4.weight']
+            },
+            {
+                'params': model_params['base4.bias'],
+                'weight_decay': 0
+            },
+        ],
                   lr=cfg.lr,
                   weight_decay=cfg.decay,
                   momentum=cfg.momentum),
         'reduc':
-        optim.SGD(
-            [
-                {
-                    'params': model_params['reducers.weight'],
-                    'lr': cfg.lr * 0.01,
-                },
-                {
-                    'params': model_params['reducers.bias'],
-                    # 'lr': cfg.lr * 0.02,
-                    'lr': cfg.lr * 0.01,
-                    'weight_decay': 0,
-                }
-            ],
-            lr=cfg.lr,
-            weight_decay=cfg.decay,
-            momentum=cfg.momentum),
+        optim.SGD([{
+            'params': model_params['reducers.weight'],
+            'lr': cfg.lr * 0.01,
+        }, {
+            'params': model_params['reducers.bias'],
+            'lr': cfg.lr * 0.02,
+            'weight_decay': 0,
+        }],
+                  weight_decay=cfg.decay,
+                  momentum=cfg.momentum),
         'fuse':
-        optim.SGD(
-            [
-                {
-                    'params': model_params['fuse.weight'],
-                    'lr': cfg.lr * 0.01,
-                },
-                {
-                    'params': model_params['fuse.bias'],
-                    # 'lr': cfg.lr * 0.02,
-                    'lr': cfg.lr * 0.01,
-                    'weight_decay': 0,
-                }
-            ],
-            lr=cfg.lr,
-            weight_decay=cfg.decay,
-            momentum=cfg.momentum),
+        optim.SGD([{
+            'params': model_params['fuse.weight'],
+            'lr': cfg.lr * 0.01,
+        }, {
+            'params': model_params['fuse.bias'],
+            'lr': cfg.lr * 0.02,
+            'weight_decay': 0,
+        }],
+                  weight_decay=cfg.decay,
+                  momentum=cfg.momentum),
         'orientation':
         optim.SGD([{
             'params': model_params['orientation.weight'],
@@ -242,6 +263,8 @@ def train(cfg, model, device, dataloaders, run_path, writer):
 
         print('epoch {}/{}. Mode: {}'.format(epoch + 1, cfg.epochs, mode))
         model.train()
+        model.base_model.apply(freeze_bn)
+
         losses = train_one_epoch(model, dataloaders['train'], optimizers,
                                  device, mode, writer, epoch)
 
