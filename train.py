@@ -82,7 +82,7 @@ def val(model, dataloader, device, mode, writer, epoch):
         loss_ = running_loss / ((i + 1) * cfg.batch_size)
         niter = epoch * len(dataloader) + i
         writer.add_scalar('val/loss_{}'.format(mode), loss_, niter)
-        pbar.set_description('[val] lss {:.6e}'.format(loss_))
+        pbar.set_description('[val] lss {:.3e}'.format(loss_))
         pbar.update(1)
 
     pbar.close()
@@ -162,7 +162,7 @@ def train_one_epoch(model, dataloader, optimizers, device, mode, writer,
         loss_ = running_loss / ((i + 1) * cfg.batch_size)
         niter = epoch * len(dataloader) + i
         writer.add_scalar('train/loss_{}'.format(mode), loss_, niter)
-        pbar.set_description('[train] lss {:.6e}'.format(loss_))
+        pbar.set_description('[train] lss {:.3e}'.format(loss_))
         pbar.update(1)
 
     pbar.close()
@@ -261,7 +261,9 @@ def train(cfg, model, device, dataloaders, run_path, writer):
         if (epoch > cfg.epochs_pre - 1):
             mode = 'or'
 
-        print('epoch {}/{}. Mode: {}'.format(epoch + 1, cfg.epochs, mode))
+        print('epoch {}/{}, mode: {}, lr: {:.2e}'.format(
+            epoch + 1, cfg.epochs, mode, lr_sch['base'].get_last_lr()[0]))
+        writer.add_scalar('base_lr', lr_sch['base'].get_last_lr()[0], epoch)
         model.train()
         model.base_model.apply(freeze_bn)
 

@@ -36,7 +36,7 @@ class CobNet(nn.Module):
         ])
 
         for m in self.reducers:
-            nn.init.normal_(m.weight, 0.01)
+            nn.init.constant_(m.weight, 0.2)
             nn.init.constant_(m.bias, 0.)
             # nn.init.xavier_normal_(m.weight)
             # nn.init.constant_(m.bias, 0.)
