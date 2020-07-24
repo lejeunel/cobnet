@@ -99,24 +99,24 @@ def check_nan_inf(tnsr):
     return n_nan + n_inf
 
 
-def train_one_epoch(model, dataloader, optimizers, device, mode, writer,
+def train_one_epoch(model, dataloaders, optimizers, device, mode, writer,
                     epoch):
 
     running_loss = 0
 
     criterion = BalancedBCE()
 
+    if (mode == 'fs'):
+        dataloader = dataloaders['train_fs']
+    else:
+        dataloader = dataloaders['train_or']
+
     pbar = tqdm(total=len(dataloader))
     for i, data in enumerate(dataloader):
         data = utls.batch_to_device(data, device)
-        # print('image num. nan_inf: {}'.format(check_nan_inf(data['image'])))
-        # print('cntr num. nan_inf: {}'.format(check_nan_inf(data['cntr'])))
 
         # forward
         with torch.set_grad_enabled(True):
-
-            loss_sides = 0
-            loss_orient = 0
 
             if (mode == 'fs'):
 
@@ -129,18 +129,12 @@ def train_one_epoch(model, dataloader, optimizers, device, mode, writer,
 
                 # utls.print_grad_norms(model)
 
-                # detach all activations so gradient doesn't flow in past base/reduc layers
-                # sides = [s.detach() for s in sides]
-
                 y_fine, y_coarse = model.forward_fuse(sides)
 
                 loss += criterion(y_fine, data['cntr'])
                 loss += criterion(y_coarse, data['cntr'])
                 loss.backward()
-                # (loss_fine + loss_coarse).backward()
 
-                # torch.nn.utils.clip_grad_norm_(model.parameters(), 1e-2)
-                # utls.print_grad_norms(model)
                 optimizers['base'].step()
                 optimizers['reduc'].step()
                 optimizers['fuse'].step()
@@ -150,20 +144,20 @@ def train_one_epoch(model, dataloader, optimizers, device, mode, writer,
                 optimizers['fuse'].zero_grad()
 
                 running_loss += loss.cpu().detach().numpy()
-                # running_loss += loss_coarse.cpu().detach().numpy()
-                # running_loss += loss_fine.cpu().detach().numpy()
 
             else:
+                loss_orient = 0
+                optimizers['orientation'].zero_grad()
                 res = model(data['image'])
-                for i, o_ in enumerate(res['orientations']):
-                    loss_orient += criterion(res['orientations'][i],
-                                             (data['or_cntr'] == i +
+                for j, o_ in enumerate(res['orientations']):
+                    loss_orient += criterion(res['orientations'][j],
+                                             (data['or_cntr'] == j +
                                               1).float())
                 loss_orient.backward()
                 optimizers['orientation'].step()
                 running_loss += loss_orient.cpu().detach().numpy()
 
-        loss_ = running_loss / ((i + 1) * cfg.batch_size)
+        loss_ = running_loss / ((i + 1) * dataloader.batch_size)
         niter = epoch * len(dataloader) + i
         writer.add_scalar('train/loss_{}'.format(mode), loss_, niter)
         pbar.set_description('[train] lss {:.3e}'.format(loss_))
@@ -232,12 +226,12 @@ def train(cfg, model, device, dataloaders, run_path, writer):
         'orientation':
         optim.SGD([{
             'params': model_params['orientation.weight'],
+            'lr': cfg.lr
         }, {
             'params': model_params['orientation.bias'],
             'lr': cfg.lr * 2,
             'weight_decay': 0,
         }],
-                  lr=cfg.lr,
                   weight_decay=cfg.decay,
                   momentum=cfg.momentum),
     }
@@ -275,8 +269,8 @@ def train(cfg, model, device, dataloaders, run_path, writer):
         model.train()
         model.base_model.apply(freeze_bn)
 
-        losses = train_one_epoch(model, dataloaders['train'], optimizers,
-                                 device, mode, writer, epoch)
+        losses = train_one_epoch(model, dataloaders, optimizers, device, mode,
+                                 writer, epoch)
 
         # save checkpoint
         path = pjoin(run_path, 'checkpoints', 'cp_{}.pth.tar'.format(mode))
@@ -317,11 +311,16 @@ def main(cfg):
                                root_segs=cfg.root_segs,
                                augmentations=transf,
                                split='train')
-    dl_train = DataLoader(dset_train,
-                          collate_fn=dset_train.collate_fn,
-                          batch_size=cfg.batch_size,
-                          drop_last=True,
-                          shuffle=True)
+    dl_train_fs = DataLoader(dset_train,
+                             collate_fn=dset_train.collate_fn,
+                             batch_size=cfg.batch_size,
+                             drop_last=True,
+                             shuffle=True)
+    dl_train_or = DataLoader(dset_train,
+                             collate_fn=dset_train.collate_fn,
+                             batch_size=4,
+                             drop_last=True,
+                             shuffle=True)
 
     dset_val = CobDataLoader(root_imgs=cfg.root_imgs,
                              root_segs=cfg.root_segs,
@@ -334,7 +333,12 @@ def main(cfg):
                          batch_size=cfg.n_ims_test,
                          collate_fn=dset_val.collate_fn)
 
-    dataloaders = {'train': dl_train, 'prev': dl_prev, 'val': dl_val}
+    dataloaders = {
+        'train_fs': dl_train_fs,
+        'train_or': dl_train_or,
+        'prev': dl_prev,
+        'val': dl_val
+    }
 
     # Save cfg
     with open(pjoin(cfg.run_path, 'cfg.yml'), 'w') as outfile:
