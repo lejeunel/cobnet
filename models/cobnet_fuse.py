@@ -16,10 +16,16 @@ class CobNetFuseModule(nn.Module):
         self.fine = nn.Conv2d(n_sides, 1, kernel_size=1)
         self.coarse = nn.Conv2d(n_sides, 1, kernel_size=1)
 
-        nn.init.constant_(self.fine.weight, 0.25)
-        nn.init.constant_(self.fine.bias, 0.)
-        nn.init.constant_(self.coarse.weight, 0.25)
-        nn.init.constant_(self.coarse.bias, 0.)
+        pos_freq = 0.1
+        prior = -np.log((1 - pos_freq) / pos_freq)
+
+        nn.init.constant_(self.fine.bias, 0)
+        nn.init.normal_(self.fine.weight, std=0.01)
+        nn.init.constant_(self.coarse.bias, 0)
+        nn.init.normal_(self.coarse.weight, std=0.01)
+
+        self.fine.bias.data.fill_(torch.tensor(prior))
+        self.coarse.bias.data.fill_(torch.tensor(prior))
 
     def get_bias(self):
         return [self.fine.bias, self.coarse.bias]

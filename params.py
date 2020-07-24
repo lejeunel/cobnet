@@ -13,6 +13,7 @@ def get_params(path='.'):
     p.add('--aug-n-angles', type=int)
     p.add('--epochs', type=int)
     p.add('--epochs-pre', type=int)
+    p.add('--epochs-div-lr', type=int)
     p.add('--cp-period', type=int)
     p.add('--n-ims-test', type=int)
     p.add('--batch-size', type=int)

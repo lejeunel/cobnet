@@ -24,9 +24,13 @@ import math
 
 
 def freeze_bn(m):
+    # we update the running stats and freeze gamma/beta only
     classname = m.__class__.__name__
     if classname.find('BatchNorm') != -1:
-        m.eval()
+        # m.eval()
+        # m.weight.requires_grad = False
+        # m.bias.requires_grad = False
+        pass
 
 
 def make_data_aug(cfg):
@@ -116,38 +120,38 @@ def train_one_epoch(model, dataloader, optimizers, device, mode, writer,
 
             if (mode == 'fs'):
 
+                loss = 0
                 _, sides = model.forward_sides(data['image'])
 
                 # regress all side-activations
                 for s in sides:
-                    loss_sides += criterion(s, data['cntr'])
-
-                loss_sides.backward()
-                # torch.nn.utils.clip_grad_norm_(model.parameters(), 1e-2)
+                    loss += criterion(s, data['cntr'])
 
                 # utls.print_grad_norms(model)
-                optimizers['base'].step()
-                optimizers['reduc'].step()
-                optimizers['base'].zero_grad()
-                optimizers['reduc'].zero_grad()
 
                 # detach all activations so gradient doesn't flow in past base/reduc layers
-                sides = [s.detach() for s in sides]
+                # sides = [s.detach() for s in sides]
 
                 y_fine, y_coarse = model.forward_fuse(sides)
 
-                loss_fine = criterion(y_fine, data['cntr'])
-                loss_coarse = criterion(y_coarse, data['cntr'])
-                (loss_fine + loss_coarse).backward()
+                loss += criterion(y_fine, data['cntr'])
+                loss += criterion(y_coarse, data['cntr'])
+                loss.backward()
+                # (loss_fine + loss_coarse).backward()
 
                 # torch.nn.utils.clip_grad_norm_(model.parameters(), 1e-2)
                 # utls.print_grad_norms(model)
+                optimizers['base'].step()
+                optimizers['reduc'].step()
                 optimizers['fuse'].step()
+
+                optimizers['base'].zero_grad()
+                optimizers['reduc'].zero_grad()
                 optimizers['fuse'].zero_grad()
 
-                running_loss += loss_sides.cpu().detach().numpy()
-                running_loss += loss_coarse.cpu().detach().numpy()
-                running_loss += loss_fine.cpu().detach().numpy()
+                running_loss += loss.cpu().detach().numpy()
+                # running_loss += loss_coarse.cpu().detach().numpy()
+                # running_loss += loss_fine.cpu().detach().numpy()
 
             else:
                 res = model(data['image'])
@@ -182,18 +186,22 @@ def train(cfg, model, device, dataloaders, run_path, writer):
         'base':
         optim.SGD([
             {
-                'params': model_params['base0-3.weight']
+                'params': model_params['base0-3.weight'],
+                'lr': cfg.lr
             },
             {
                 'params': model_params['base0-3.bias'],
-                'weight_decay': 0
+                'weight_decay': 0,
+                'lr': cfg.lr * 2
             },
             {
-                'params': model_params['base4.weight']
+                'params': model_params['base4.weight'],
+                'lr': cfg.lr * 100
             },
             {
                 'params': model_params['base4.bias'],
-                'weight_decay': 0
+                'weight_decay': 0,
+                'lr': cfg.lr * 200
             },
         ],
                   lr=cfg.lr,
@@ -202,10 +210,10 @@ def train(cfg, model, device, dataloaders, run_path, writer):
         'reduc':
         optim.SGD([{
             'params': model_params['reducers.weight'],
-            'lr': cfg.lr * 0.01,
+            'lr': cfg.lr * 100,
         }, {
             'params': model_params['reducers.bias'],
-            'lr': cfg.lr * 0.02,
+            'lr': cfg.lr * 200,
             'weight_decay': 0,
         }],
                   weight_decay=cfg.decay,
@@ -213,10 +221,10 @@ def train(cfg, model, device, dataloaders, run_path, writer):
         'fuse':
         optim.SGD([{
             'params': model_params['fuse.weight'],
-            'lr': cfg.lr * 0.01,
+            'lr': cfg.lr * 100,
         }, {
             'params': model_params['fuse.bias'],
-            'lr': cfg.lr * 0.02,
+            'lr': cfg.lr * 200,
             'weight_decay': 0,
         }],
                   weight_decay=cfg.decay,
@@ -236,16 +244,16 @@ def train(cfg, model, device, dataloaders, run_path, writer):
     lr_sch = {
         'base':
         optim.lr_scheduler.MultiStepLR(optimizers['base'],
-                                       milestones=[cfg.epochs_pre]),
+                                       milestones=[cfg.epochs_div_lr],
+                                       gamma=0.1),
         'reduc':
         optim.lr_scheduler.MultiStepLR(optimizers['reduc'],
-                                       milestones=[cfg.epochs_pre]),
+                                       milestones=[cfg.epochs_div_lr],
+                                       gamma=0.1),
         'fuse':
         optim.lr_scheduler.MultiStepLR(optimizers['fuse'],
-                                       milestones=[cfg.epochs_pre]),
-        'orientation':
-        optim.lr_scheduler.MultiStepLR(optimizers['orientation'],
-                                       milestones=[cfg.epochs_pre])
+                                       milestones=[cfg.epochs_div_lr],
+                                       gamma=0.1)
     }
 
     fs_path = pjoin(run_path, 'checkpoints', 'cp_fs.pth.tar')
@@ -319,9 +327,10 @@ def main(cfg):
                              root_segs=cfg.root_segs,
                              split='val')
 
-    dl_val = DataLoader(dset_val, collate_fn=dset_val.collate_fn)
+    dl_val = DataLoader(dset_val,
+                        collate_fn=dset_val.collate_fn,
+                        batch_size=32)
     dl_prev = DataLoader(dset_val,
-                         shuffle=True,
                          batch_size=cfg.n_ims_test,
                          collate_fn=dset_val.collate_fn)
 

@@ -1,9 +1,10 @@
 aug-n-angles: 4
 epochs: 10
 epochs-pre: 8
+epochs-div-lr: 6
 cp-period: 1
 n-ims-test: 10
-batch-size: 1
-lr: 1e-6
+batch-size: 16
+lr: 1e-4
 decay: 2e-4
 momentum: 0.9

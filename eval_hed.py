@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 
-import os
-import numpy as np
-from os.path import join as pjoin
 import glob
-import cv2 as cv
-from tqdm import tqdm
-from skimage import io
+import os
 import urllib.request
-import higra as hg
+from os.path import join as pjoin
+
 import configargparse
+import cv2 as cv
+import numpy as np
+
+model_weights_url = 'http://vcl.ucsd.edu/hed/hed_pretrained_bsds.caffemodel'
+model_weights_file = 'hed_pretrained_bsds.caffemodel'
+
+model_arch_file = 'hed_pretrained_bsds.prototxt'
+model_arch_url = 'https://raw.githubusercontent.com/legolas123/cv-tricks.com/master/OpenCV/Edge_detection/deploy.prototxt'
 
 
 class CropLayer(object):
@@ -42,12 +46,11 @@ def get_model(model_root_path=os.path.expanduser(pjoin('~', '.models'))):
     if not os.path.exists(model_root_path):
         os.makedirs(model_root_path)
 
-    model_weights_url = 'http://vcl.ucsd.edu/hed/hed_pretrained_bsds.caffemodel'
     model_weights_path = os.path.expanduser(
-        pjoin(model_root_path, 'hed_pretrained_bsds.caffemodel'))
+        pjoin(model_root_path, model_weights_file))
+
     model_arch_path = os.path.expanduser(
-        pjoin(model_root_path, 'hed_pretrained_bsds.prototxt'))
-    model_arch_url = 'https://raw.githubusercontent.com/legolas123/cv-tricks.com/master/OpenCV/Edge_detection/deploy.prototxt'
+        pjoin(model_root_path, model_arch_file))
 
     if (not os.path.exists(model_weights_path)):
         print('Downloading HED model weights to {}'.format(model_weights_path))
@@ -84,7 +87,6 @@ def do_pb_single(im_path, model):
 
 if __name__ == "__main__":
 
-    import matplotlib.pyplot as plt
     p = configargparse.ArgParser()
 
     p.add('--in-path', required=True)

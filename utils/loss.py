@@ -2,10 +2,11 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
+import matplotlib.pyplot as plt
 
 
 class BalancedBCE(nn.Module):
-    def __init__(self, cuda=True):
+    def __init__(self):
         super(BalancedBCE, self).__init__()
 
     def forward(self, input, target):
@@ -13,11 +14,14 @@ class BalancedBCE(nn.Module):
                                                  target,
                                                  reduction='none')
 
-        beta = target.sum() / target.numel()
-        if target.sum() > 0:
-            loss = ((1 - beta) * bce[target == 1]).mean()
-            loss += (beta * bce[target == 0]).mean()
-        else:
-            loss = bce.mean()
+        bsize = target.shape[0]
+        beta_pos = torch.tensor([1 - t.sum() / t.numel() for t in target])
+        beta_neg = torch.tensor([t.sum() / t.numel() for t in target])
+        loss_pos = torch.cat([
+            beta_pos[i] * bce[i][target[i] == 1] for i in range(bsize)
+        ]).mean()
+        loss_neg = torch.cat([
+            beta_neg[i] * bce[i][target[i] == 0] for i in range(bsize)
+        ]).mean()
 
-        return loss
+        return loss_pos + loss_neg
