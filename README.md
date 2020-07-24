@@ -3,6 +3,13 @@ PyTorch implementation of [Convolutional Oriented Boundaries](https://github.com
 
 This is still work in progress!!!
 
+## Differences w.r.t original implementation:
+- ResNet50 from pyTorch model zoo, which differs from author's Caffe model (has batch normalization layers)
+- Batch size of 16
+- Base learning-rate is 1e-4 and is increased for "deeper" layers
+- Weight initialization is gaussian/normal instead of constant
+
+
 # Dependencies
 Most of these are easily installed with your favorite package manager
 

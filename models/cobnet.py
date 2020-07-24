@@ -63,8 +63,6 @@ class CobNet(nn.Module):
                       kernel_size=1),
         ])
 
-        pos_freq = 0.1
-        prior = -np.log((1 - pos_freq) / pos_freq)
         for m in self.reducers:
             nn.init.normal_(m.weight, std=0.01)
             nn.init.constant_(m.bias, 0)
